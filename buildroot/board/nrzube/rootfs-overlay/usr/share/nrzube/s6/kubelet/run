@@ -22,10 +22,18 @@ done
 
 echo "nrzube[kubelet]: starting kubelet"
 
+# The name of the node object is imposed: the kubelet would otherwise derive
+# it from the system hostname.
+NODE_NAME=""
+if [ -r /run/nrzube/node-name ]; then
+	NODE_NAME="$(cat /run/nrzube/node-name)"
+fi
+
 # --cgroup-driver=cgroupfs: no systemd on the node (containerd runs with
 # SystemdCgroup = false as well).
 exec /usr/bin/kubelet \
 	--config=/var/lib/kubelet/config.yaml \
 	--container-runtime-endpoint=unix:///run/containerd/containerd.sock \
 	--cgroup-driver=cgroupfs \
+	${NODE_NAME:+--hostname-override="$NODE_NAME"} \
 	--v=2

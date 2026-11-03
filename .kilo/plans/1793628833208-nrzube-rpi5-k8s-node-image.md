@@ -22,6 +22,7 @@
 | Real initramfs (slot A/B, failed-boot counter, rollback, `/etc` overlay) | done, **never assembled** | `buildroot/board/nrzube/initramfs/init` |
 | Stage 1 initramfs (boot gate) | done, **built and verified** | `buildroot/board/nrzube/initramfs/stage1-init` |
 | Rust agent | done, unit tested, **never run on hardware** | `agent/` |
+| Node name / hostname | done | the agent applies `kubeletFlags.nodeName` to the system hostname, `/etc/hostname` and the kubelet `--hostname-override` |
 | Image assembly (GPT, FAT, squashfs slots, ext4 state) | done, **only the boot gate variant has been built** | `scripts/build-image.sh` |
 | Build drivers (native + container) | done | `scripts/build-all.sh`, `scripts/native-build.sh`, `scripts/local-build.sh` |
 | Version pinning | done | `versions.lock`, `versions.mk`, `scripts/refresh-versions-lock.sh` |
@@ -164,6 +165,7 @@ that:
 | CI | **GitHub Actions**, native arm64 runner `ubuntu-24.04-arm` + native Arch script | GHA is possible and arm64 means no emulation |
 | Signing / hashing | **cosign** (key-pair) + **SHA-256** of each artifact in CI | explicitly requested |
 | Consoles | **HDMI (`tty1`) and serial (`ttyAMA0`, 115200)** | the node is usually headless but the screen is the easiest way to read the boot |
+| Node name | **`kubeletFlags.nodeName`**, applied by the agent to the hostname **and** passed as `--hostname-override` | the kubelet derives the node object name from the hostname; both must agree with the name the cluster expects |
 
 ## 3. Technical constraints discovered (they drive the design)
 
@@ -264,7 +266,8 @@ Single binary, ~3–5 MiB, started by s6. Responsibilities:
 2. The config contains: `apiServer`, `caCert`, `clientCert`/`clientKey` (or a token), `kubeletFlags`, `cni`, `registry` (URL + pull token), `cosignPublicKey` (optional, otherwise the embedded one).
 3. The agent writes: `/var/lib/kubelet/pki/*`, `/var/lib/kubelet/kubeconfig`, `/var/lib/kubelet/config.yaml` (KubeletConfiguration), `/etc/cni/net.d/*`.
 4. The agent **persists the config** in `/var/lib/nrzube/node-config.json` (p4) and sets the `provisioned` marker.
-5. The agent then starts the kubelet service (s6 depends on the agent through `contents.d`).
+5. The agent **applies the node name**: `sethostname(2)` (the running hostname, what `uname -n` shows), `/etc/hostname` (persistent, in the overlay upper of p4) and `/run/nrzube/node-name`. The name must be a valid DNS-1123 label — it is the name of the Kubernetes node object.
+6. The agent then starts the kubelet service (s6 depends on the agent through `contents.d`). The kubelet is started with `--hostname-override`: without it, it would derive the name of the node object from the system hostname, which would then disagree with `kubeletFlags.nodeName` (and with the name the agent watches).
 
 > **On the next boot the DHCP is no longer consulted for the config**: the agent re-reads `node-config.json`. This is what makes the node operational offline (§6.2). The config is re-downloaded only on **explicit request** (certificate renewal, cluster change).
 

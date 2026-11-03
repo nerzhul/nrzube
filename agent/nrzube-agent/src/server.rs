@@ -6,9 +6,9 @@
 
 use anyhow::{Context, Result};
 use http_body_util::Full;
-use hyper::body::{Bytes, Incoming};
+use hyper::body::Bytes;
 use hyper::service::service_fn;
-use hyper::{Request, Response, StatusCode};
+use hyper::{Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::convert::Infallible;
 use std::sync::Arc;

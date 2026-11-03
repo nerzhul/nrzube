@@ -153,6 +153,9 @@ async fn bootstrap(
                 if let Err(err) = config.write_derived_files(paths) {
                     log::error!("cannot write the derived files: {err:#}");
                 }
+                if let Err(err) = config.apply_hostname(paths) {
+                    log::error!("cannot apply the node name: {err:#}");
+                }
                 metrics.configured.store(true, Ordering::Relaxed);
                 mark_provisioned(paths);
                 log::info!("the node configuration comes from the persisted state");
@@ -181,6 +184,11 @@ async fn bootstrap(
                 }
                 if let Err(err) = config.write_derived_files(paths) {
                     log::error!("cannot write the derived files: {err:#}");
+                    tokio::time::sleep(BOOTSTRAP_RETRY).await;
+                    continue;
+                }
+                if let Err(err) = config.apply_hostname(paths) {
+                    log::error!("cannot apply the node name: {err:#}");
                     tokio::time::sleep(BOOTSTRAP_RETRY).await;
                     continue;
                 }

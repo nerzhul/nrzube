@@ -39,6 +39,8 @@ pub struct Paths {
     pub cosign_pubkey: PathBuf,
     /// Runtime directory.
     pub run_dir: PathBuf,
+    /// The persistent hostname file.
+    pub hostname_file: PathBuf,
 }
 
 impl Default for Paths {
@@ -56,6 +58,7 @@ impl Default for Paths {
             containerd_certs_dir: PathBuf::from("/etc/containerd/certs.d"),
             cosign_pubkey: PathBuf::from("/etc/nrzube/cosign.pub"),
             run_dir: PathBuf::from("/run/nrzube"),
+            hostname_file: PathBuf::from("/etc/hostname"),
         }
     }
 }
@@ -77,6 +80,7 @@ impl Paths {
             containerd_certs_dir: root.join("etc/containerd/certs.d"),
             cosign_pubkey: root.join("etc/nrzube/cosign.pub"),
             run_dir: root.join("run/nrzube"),
+            hostname_file: root.join("etc/hostname"),
         }
     }
 }
@@ -221,6 +225,39 @@ impl NodeConfig {
             .node_name
             .clone()
             .unwrap_or_else(|| "nrzube".to_string())
+    }
+
+    /// Apply the node name to the system.
+    ///
+    /// The kubelet derives the name of the node object from the system
+    /// hostname: both must agree with `kubeletFlags.nodeName`, otherwise the
+    /// node registers under another name than the one the agent watches (and
+    /// than the one the cluster expects).
+    ///
+    /// The name is also published in `/run/nrzube/node-name` so that the
+    /// kubelet service can pass `--hostname-override` explicitly.
+    pub fn apply_hostname(&self, paths: &Paths) -> Result<()> {
+        let name = self.node_name();
+        validate_dns1123(&name)
+            .with_context(|| format!("the node name {name:?} is not a valid DNS-1123 label"))?;
+
+        // The running hostname (UTS): what "uname -n", the logs and the
+        // kubelet see. It needs the CAP_SYS_ADMIN capability (the agent
+        // runs as root); a failure is not fatal because the kubelet is
+        // started with an explicit --hostname-override.
+        if let Err(err) = set_hostname(&name) {
+            log::warn!("cannot set the running hostname: {err:#}");
+        }
+
+        // The persistent file: /etc is an overlay, the file lives in the
+        // state partition and survives the reboots.
+        util::write_atomic_str(&paths.hostname_file, &name)?;
+
+        // The marker read by the kubelet service.
+        util::write_atomic_str(&paths.run_dir.join("node-name"), &name)?;
+
+        log::info!("the node name is {name}");
+        Ok(())
     }
 
     /// Write the files derived from the configuration: kubelet PKI,
@@ -390,6 +427,37 @@ pub fn dhcp_config_url(paths: &Paths) -> Option<String> {
     }
 }
 
+/// Check that a name is a valid DNS-1123 label (the Kubernetes node names).
+fn validate_dns1123(name: &str) -> Result<()> {
+    if name.is_empty() || name.len() > 63 {
+        bail!("a DNS-1123 label must be between 1 and 63 characters long");
+    }
+    let valid = name
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    if !valid {
+        bail!("a DNS-1123 label only holds lowercase letters, digits and dashes");
+    }
+    if name.starts_with('-') || name.ends_with('-') {
+        bail!("a DNS-1123 label cannot start or end with a dash");
+    }
+    Ok(())
+}
+
+/// Set the running hostname (UTS namespace).
+fn set_hostname(name: &str) -> Result<()> {
+    let bytes = name.as_bytes();
+    // SAFETY: the pointer and the length describe a valid byte string, which
+    // sethostname copies before returning.
+    let result = unsafe {
+        libc::sethostname(bytes.as_ptr() as *const libc::c_char, bytes.len())
+    };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error()).context("sethostname");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,5 +520,38 @@ mod tests {
         let kubelet = std::fs::read_to_string(paths.kubelet_dir.join("config.yaml")).unwrap();
         assert!(kubelet.contains("cgroupDriver: cgroupfs"));
         assert!(kubelet.contains("- 10.96.0.10"));
+    }
+
+    #[test]
+    fn applies_the_node_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::under(dir.path());
+        let config = sample();
+
+        config.apply_hostname(&paths).unwrap();
+
+        assert_eq!(
+            util::read_trimmed(&paths.hostname_file).as_deref(),
+            Some("nrzube-01")
+        );
+        assert_eq!(
+            util::read_trimmed(&paths.run_dir.join("node-name")).as_deref(),
+            Some("nrzube-01")
+        );
+    }
+
+    #[test]
+    fn rejects_an_invalid_node_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::under(dir.path());
+
+        for invalid in ["", "Nrzube-01", "nrzube_01", "-nrzube", "nrzube-", &"a".repeat(64)] {
+            let mut config = sample();
+            config.kubelet_flags.node_name = Some(invalid.to_string());
+            assert!(
+                config.apply_hostname(&paths).is_err(),
+                "{invalid:?} should have been rejected"
+            );
+        }
     }
 }
