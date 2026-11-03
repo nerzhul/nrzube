@@ -1,0 +1,66 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — PID 1 of the running system.
+#
+# The initramfs has already mounted the state partition (p4) on /var, moved
+# /proc, /sys and /dev into the new root and switched to it. This script
+# completes the runtime setup (volatile filesystems, kernel parameters) and
+# hands over to the s6 supervision tree.
+# =============================================================================
+set -u
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+log() {
+	echo "nrzube[init]: $*"
+}
+
+is_mounted() {
+	grep -q " $1 " /proc/mounts 2>/dev/null
+}
+
+# --- Kernel filesystems ------------------------------------------------------
+# Normally moved into the new root by the initramfs; remounted if missing.
+[ -d /proc/self ] || mount -t proc proc /proc
+[ -d /sys/class ] || mount -t sysfs sysfs /sys
+[ -e /dev/null ] || mount -t devtmpfs devtmpfs /dev
+
+# --- Volatile filesystems ----------------------------------------------------
+# /run and /tmp are tmpfs: the persistent state lives in p4, mounted on /var.
+mkdir -p /run /tmp /run/nrzube /var/log/nrzube
+is_mounted /run || mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run
+is_mounted /tmp || mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp
+
+# --- Kernel modules ----------------------------------------------------------
+# The defconfig builds most of the network stack in; the remaining modules are
+# loaded explicitly (no udev/mdev auto-loading in the boot path).
+if [ -r /etc/modules ]; then
+	while read -r module rest; do
+		case "$module" in
+		''|\#*) continue ;;
+		esac
+		modprobe "$module" 2>/dev/null || true
+	done < /etc/modules
+fi
+
+# --- Kernel parameters -------------------------------------------------------
+# Plan §6.5: applied BEFORE any service starts (kube-proxy and the CNIs
+# depend on ip_forward, and the SLAAC would silently break without
+# accept_ra=2 while IPv6 forwarding is on).
+if [ -x /etc/nrzube/sysctl.sh ]; then
+	/etc/nrzube/sysctl.sh
+else
+	log "WARNING: /etc/nrzube/sysctl.sh missing, skipping the sysctl policy"
+fi
+
+# --- s6 supervision ----------------------------------------------------------
+# The service definitions live in the read-only rootfs and are copied to
+# /run (tmpfs): the supervision state is never persisted, and the /etc
+# overlay stays free of supervision artefacts.
+rm -rf /run/s6
+mkdir -p /run/s6
+cp -a /usr/share/nrzube/s6/. /run/s6/
+
+log "starting s6 supervision tree (/run/s6)"
+exec /bin/s6-svscan /run/s6

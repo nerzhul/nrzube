@@ -1,0 +1,84 @@
+# =============================================================================
+# nrzube — Raspberry Pi 5, BOOT GATE configuration (kernel only).
+#
+# This is the Phase 1 configuration of the plan: it builds only what is
+# needed to validate the boot chain on the hardware:
+#
+#   firmware -> U-Boot -> kernel -> initramfs -> shell
+#
+# It contains no rootfs slot, no state partition, no containerd, no kubelet
+# and no agent: the build is much faster and the validation unambiguous.
+#
+# The full configuration is nrzube_pi5_defconfig.
+# =============================================================================
+
+# --- Architecture -------------------------------------------------------------
+BR2_aarch64=y
+BR2_cortex_a76=y
+
+# --- Toolchain ---------------------------------------------------------------
+# External glibc toolchain (Bootlin).
+#
+# The internal toolchain cannot be used with a custom git kernel: the kernel
+# headers series is not declared, the glibc option of the toolchain becomes
+# invisible and uClibc is silently selected instead. The external toolchain
+# declares its headers version, and it also saves ~20 minutes of build time.
+# External glibc toolchain (Bootlin).
+#
+# The internal toolchain cannot be used with a custom git kernel: the kernel
+# headers series is not declared, the glibc option of the toolchain becomes
+# invisible and uClibc is silently selected instead. The external toolchain
+# declares its headers version, and it also saves ~20 minutes of build time.
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y
+# GCC 15+ fails to build its own libcpp with -Werror=format-security on
+# recent glibc; GCC 14 is the last version that builds cleanly here.
+BR2_GCC_VERSION_14_X=y
+# The hash check is NOT forced: Buildroot would then also require a digest
+# for the archive it generates itself from the kernel git repository. Every
+# release artifact is checked against versions.lock by the post-build script
+# (SHA-256) and the pinned kernel commit is verified after the checkout.
+
+# --- System ------------------------------------------------------------------
+# Only busybox: it provides the initramfs (the shell and the mount tools).
+BR2_INIT_NONE=y
+BR2_PACKAGE_BUSYBOX=y
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrzube/busybox-nrzube.fragment"
+# BR2_TARGET_ROOTFS_EXT2 is not set
+# BR2_TARGET_ROOTFS_SQUASHFS is not set
+# BR2_TARGET_ROOTFS_TAR is not set
+# BR2_TARGET_ROOTFS_CPIO is not set
+
+# --- Kernel ------------------------------------------------------------------
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_GIT=y
+# The headers come from the kernel tree; the series is declared explicitly
+# because a custom git kernel does not select it (the glibc option of the
+# toolchain depends on it).
+BR2_KERNEL_HEADERS_AS_KERNEL=y
+BR2_TOOLCHAIN_HEADERS_AT_LEAST_6_18=y
+BR2_LINUX_KERNEL_CUSTOM_REPO_URL="https://github.com/raspberrypi/linux.git"
+BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION="$(KERNEL_TAG)"
+BR2_LINUX_KERNEL_USE_DEFCONFIG=y
+BR2_LINUX_KERNEL_DEFCONFIG="bcm2712"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrzube/kernel-nrzube.fragment"
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="broadcom/bcm2712-rpi-5-b"
+BR2_LINUX_KERNEL_IMAGE_NAME="Image"
+
+# --- Host tools --------------------------------------------------------------
+BR2_PACKAGE_HOST_UBOOT_TOOLS=y
+BR2_PACKAGE_HOST_UBOOT_TOOLS_BOOT_SCRIPT=y
+BR2_PACKAGE_HOST_UBOOT_TOOLS_BOOT_SCRIPT_SOURCE="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrzube/boot.cmd"
+# The kernel builds its certificate tools (extract-cert): it needs the host
+# OpenSSL headers.
+BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_SQUASHFS=y
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+# mtools is NOT built by Buildroot: the host tools are used instead (the
+# Buildroot version needs the X11 headers for "floppyd", which are not
+# available on every build host). mcopy is only needed to populate the FAT
+# boot partition.
+BR2_PACKAGE_HOST_E2FSPROGS=y

@@ -1,0 +1,45 @@
+# =============================================================================
+# nrzube — containerd configuration.
+#
+# containerd 2.x: cgroup v2 only, no systemd on the node.
+# ============================================================================
+
+version = 3
+
+root = "/var/lib/containerd"
+state = "/run/containerd"
+
+[grpc]
+  address = "/run/containerd/containerd.sock"
+
+[debug]
+  level = "info"
+
+[plugins]
+
+  [plugins."io.containerd.grpc.v1.cri"]
+    # No systemd on the node: the cgroup manager is the plain cgroupfs one.
+    # Both the deprecated top-level key and the per-runtime option are set:
+    # containerd 2.x reads the runtime option.
+    systemd_cgroup = false
+    sandbox_image = "registry.k8s.io/pause:3.10"
+
+    [plugins."io.containerd.grpc.v1.cri".containerd]
+      default_runtime_name = "runc"
+      snapshotter = "overlayfs"
+
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+        runtime_type = "io.containerd.runc.v2"
+
+        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+          BinaryName = "/usr/bin/runc"
+          SystemdCgroup = false
+
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      # The pull token is delivered by the node configuration (DHCP option
+      # 224), never baked into the image. A public registry needs no token.
+      config_path = "/etc/containerd/certs.d"
+
+  [plugins."io.containerd.monitor.v1.cri"]
+    # cgroup v2 metrics for the kubelet / cAdvisor.
+    enabled = false

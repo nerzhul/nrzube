@@ -1,0 +1,38 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — pre-flight checks (s6 service "nrzube-base").
+#
+# Runs once, before the long running services. It stays up afterwards so that
+# the services depending on it (contents.d) can rely on its "up" state.
+# =============================================================================
+exec 2>&1
+
+slot="$(cat /nrzube-slot-id 2>/dev/null || echo '?')"
+echo "nrzube[base]: slot=$slot kernel=$(uname -r)"
+
+# The state partition holds the slot selector, the node configuration and the
+# containerd/kubelet state. Without it there is no persistence at all.
+if ! grep -q " /var " /proc/mounts 2>/dev/null; then
+	echo "nrzube[base]: FATAL: /var is not a mount point (state partition missing)" >&2
+	# Stay down: the dependent services must not start.
+	while true; do
+		sleep 3600
+	done
+fi
+
+if [ ! -d /var/lib/nrzube ]; then
+	mkdir -p /var/lib/nrzube
+fi
+
+# The slot selector is the only piece of state the initramfs depends on.
+if [ ! -f /var/lib/nrzube/active-slot ]; then
+	echo "nrzube[base]: no active-slot marker, defaulting to A"
+	printf 'A\n' > /var/lib/nrzube/active-slot
+fi
+
+mkdir -p /run/nrzube
+: > /run/nrzube/base-ready
+
+echo "nrzube[base]: ready"
+# Stay up: the services that depend on this one wait for its "up" state.
+exec tail -f /dev/null

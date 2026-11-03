@@ -1,0 +1,15 @@
+# =============================================================================
+# nrzube — fstab (informative).
+#
+# Nothing here is mounted with "mount -a":
+#  - the state partition (p4) is mounted by the initramfs on /var: it holds
+#    the slot selector, the node configuration and the containerd/kubelet
+#    state, and it must be available BEFORE /init runs;
+#  - /run and /tmp are mounted by /init (tmpfs).
+# =============================================================================
+
+proc	/proc	proc	defaults	0	0
+sysfs	/sys	sysfs	defaults	0	0
+devtmpfs	/dev	devtmpfs	defaults	0	0
+tmpfs	/run	tmpfs	mode=0755,nosuid,nodev	0	0
+tmpfs	/tmp	tmpfs	mode=1777,nosuid,nodev	0	0

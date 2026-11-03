@@ -1,0 +1,16 @@
+# Modules loaded by /init before the services start.
+#
+# Everything needed by the boot path (ext4, squashfs, overlayfs, IPv6,
+# netfilter, bridge, veth) is built into the kernel: see
+# board/nrzube/kernel-nrzube.fragment.
+#
+# The modules below are the optional ones (tunnel encapsulations, extra
+# netfilter matches) that a CNI may need at runtime.
+
+vxlan
+geneve
+nft_ct
+nft_limit
+nft_log
+ip_set
+ip_set_hashnet

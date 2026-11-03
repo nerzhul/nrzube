@@ -1,0 +1,38 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — stage 1 initramfs (boot gate).
+#
+# This is the initramfs of the Phase 1 validation: it only has to bring the
+# console up and give a shell, so that the boot chain
+# (firmware -> U-Boot -> kernel -> initramfs) can be validated on the
+# hardware before the whole system is built.
+#
+# The real initramfs (slot selection, A/B rollback) is initramfs/init.
+# =============================================================================
+set -u
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PATH
+
+log() {
+	echo "nrzube[stage1]: $*"
+}
+
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sys /sys 2>/dev/null
+mount -t devtmpfs dev /dev 2>/dev/null
+
+log "kernel: $(uname -a)"
+log "cmdline: $(cat /proc/cmdline)"
+
+if [ -f /proc/device-tree/model ]; then
+	log "model: $(tr -d '\0' < /proc/device-tree/model)"
+fi
+
+# The DTB handed over by the firmware (the firmware passes it through x0).
+if [ -f /proc/device-tree/compatible ]; then
+	log "compatible: $(tr '\0' ' ' < /proc/device-tree/compatible)"
+fi
+
+log "the boot chain works: dropping to a shell"
+exec /bin/sh

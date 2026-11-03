@@ -1,0 +1,31 @@
+# =============================================================================
+# nrzube — DHCP hook.
+#
+# The dhcpcd default hook (/usr/lib/dhcpcd/dhcpcd-run-hooks) sources every
+# file of this directory, so this script is *sourced*, not executed: it must
+# not use "exit" (that would terminate the parent hook).
+#
+# dhcpcd exports the defined options as new_<name> (new value) and
+# old_<name> (previous value).
+# =============================================================================
+
+url="${new_nrzube_config_url:-}"
+
+if [ -n "$url" ]; then
+	case "$url" in
+	http://* | https://*) ;;
+	*)
+		echo "nrzube[dhcpcd]: malformed node configuration URL, ignored" >&2
+		url=""
+		;;
+	esac
+fi
+
+if [ -n "$url" ]; then
+	mkdir -p /run/nrzube
+	umask 077
+	# Write then rename: the agent never reads a partially written URL.
+	printf '%s\n' "$url" > /run/nrzube/dhcp-config-url.tmp &&
+		mv /run/nrzube/dhcp-config-url.tmp /run/nrzube/dhcp-config-url &&
+		echo "nrzube[dhcpcd]: node configuration URL received (option 224)"
+fi

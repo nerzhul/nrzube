@@ -1,0 +1,100 @@
+# nrzube — pinned versions (single source of truth)
+#
+# Format: KEY=VALUE, one entry per component.
+# "# renovate: ..." lines are annotations read by Renovate (see renovate.json):
+# they carry the datasource and the upstream repository.
+#
+# Rules:
+#  - no implicit version: everything downloaded is listed here;
+#  - git sources are pinned by COMMIT (never by branch);
+#  - binary artifacts are pinned by SHA-256;
+#  - URLs are *derived* from the versions (see versions.mk) so that a
+#    Renovate version bump can never leave a stale URL behind.
+#
+# `make versions-lock` re-resolves the COMMITs from the TAGs (GitHub API) and
+# recomputes the SHA-256 of the release artifacts.
+
+# --- Buildroot (build system, not a distro) ---------------------------------
+# renovate: datasource=github-tags depName=buildroot/buildroot versioning=loose
+BUILDROOT_VERSION=2026.08.1
+BUILDROOT_COMMIT=7fdeadb3b9f12f78e5fccca914d7fef47090ab9a
+BUILDROOT_SHA256=38a6c152490096018720a9ade379ee1e571c9bf5f93a3657a166566945a98b0d
+
+# --- Kernel (raspberrypi/linux, rpi-6.18.y branch frozen on a tag) ----------
+# renovate: datasource=github-tags depName=raspberrypi/linux versioning=loose
+KERNEL_VERSION=6.18.39
+KERNEL_TAG=stable_20260724
+KERNEL_COMMIT=60ea684a8ace97bb0db1a16e20753bdd6ab371ff
+KERNEL_REPO=raspberrypi/linux
+KERNEL_BRANCH=rpi-6.18.y
+
+# --- Raspberry Pi firmware (DTB handed over to U-Boot through x0) ------------
+# renovate: datasource=github-tags depName=raspberrypi/firmware versioning=loose
+FIRMWARE_TAG=1.20260915
+FIRMWARE_COMMIT=6f0881cba8bea8ec24956a5718714730e9936ec5
+FIRMWARE_REPO=raspberrypi/firmware
+FIRMWARE_SHA256=58751354e5c8289d3660511958e8c7869de010f6719d8e1859820391058a337c
+
+# --- EEPROM (Pi 5 bootloader) ------------------------------------------------
+# renovate: datasource=github-tags depName=raspberrypi/rpi-eeprom versioning=loose
+EEPROM_TAG=v2026.09.25-2712
+EEPROM_COMMIT=ded1e9332bd996f6adc46e10d22d9ef0298b1882
+EEPROM_REPO=raspberrypi/rpi-eeprom
+
+# --- U-Boot (chainloaded through config.txt: kernel=u-boot.bin) --------------
+# renovate: datasource=github-tags depName=u-boot/u-boot versioning=loose
+UBOOT_TAG=v2026.10
+UBOOT_COMMIT=5508406582f6f7120dce0c4b3059819a41788db2
+UBOOT_SHA256=f943a88389c8fd70a6b0d061a88267465e143c7ca6ea2b75837ab20f5b60c739
+
+# --- containerd (static arm64 binary) ---------------------------------------
+# renovate: datasource=github-tags depName=containerd/containerd versioning=loose
+CONTAINERD_VERSION=2.4.2
+CONTAINERD_SHA256=37b84b9534533672528141b9d815f58621a2fe5deee2daa84317800255756689
+
+# --- runc (MANDATORY >= 1.5.2, see kernel >= 6.17 in the plan §3.3) ---------
+# renovate: datasource=github-tags depName=opencontainers/runc versioning=loose
+RUNC_VERSION=1.5.2
+RUNC_SHA256=d10ecae898361832a059be2089bab92d158aec54661b18ed7346ed79628b46b0
+
+# --- Kubernetes (glibc kubelet, static kubectl) ------------------------------
+# renovate: datasource=github-tags depName=kubernetes/kubernetes versioning=loose
+KUBERNETES_VERSION=1.37.2
+KUBELET_SHA256=de19336829ed3d3e0dea00bd22663f82e0f6709ded074879854a709e914cdaf6
+KUBECTL_SHA256=fcc16f63186659d9722014b7e02d5fdd2d4e669cb8c0ab66365d7d3b8ba03509
+
+# --- CNI plugins --------------------------------------------------------------
+# The cluster provides the CNI configuration (DaemonSet) and kube-proxy; the
+# image only ships the plugin BINARIES the kubelet invokes.
+# renovate: datasource=github-tags depName=containernetworking/plugins versioning=loose
+CNI_VERSION=1.9.1
+CNI_SHA256=56171987d3947707c3563db2f4001bccaf50fd63468611b9f3cbecb1375ee7ec
+
+# --- cosign (release manifest signing) ---------------------------------------
+# renovate: datasource=github-tags depName=sigstore/cosign versioning=loose
+COSIGN_VERSION=3.1.4
+COSIGN_SHA256=ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2
+
+# --- dhcpcd (DHCPv4 + DHCPv6 + user-space RA/SLAAC + resolv.conf) -----------
+# renovate: datasource=github-tags depName=NetworkConfiguration/dhcpcd versioning=loose
+DHCPCD_VERSION=10.2.4
+DHCPCD_SHA256=6721e606609226dbf4d864a78802a9e96beec0ee034a1bd84138b3e037bba7d9
+
+# --- Rust (nrzube-agent cross-compilation) -----------------------------------
+# renovate: datasource=github-tags depName=rust-lang/rust versioning=loose
+RUST_VERSION=1.94.0
+
+# --- URL templates ------------------------------------------------------------
+# The "@VERSION@" placeholder is replaced by the version of the component.
+# The URLs are derived (never hardcoded) so that a version bump can not leave
+# a stale URL behind. Both the make and the shell build scripts use them.
+
+BUILDROOT_URL_TEMPLATE=https://buildroot.org/downloads/buildroot-@VERSION@.tar.gz
+FIRMWARE_URL_TEMPLATE=https://github.com/raspberrypi/firmware/archive/refs/tags/@VERSION@.tar.gz
+UBOOT_URL_TEMPLATE=https://github.com/u-boot/u-boot/archive/refs/tags/@VERSION@.tar.gz
+CONTAINERD_URL_TEMPLATE=https://github.com/containerd/containerd/releases/download/v@VERSION@/containerd-static-@VERSION@-linux-arm64.tar.gz
+RUNC_URL_TEMPLATE=https://github.com/opencontainers/runc/releases/download/v@VERSION@/runc.arm64
+KUBERNETES_URL_TEMPLATE=https://dl.k8s.io/release/v@VERSION@/bin/linux/arm64
+CNI_URL_TEMPLATE=https://github.com/containernetworking/plugins/releases/download/v@VERSION@/cni-plugins-linux-arm64-v@VERSION@.tgz
+COSIGN_URL_TEMPLATE=https://github.com/sigstore/cosign/releases/download/v@VERSION@/cosign-linux-arm64
+DHCPCD_URL_TEMPLATE=https://github.com/NetworkConfiguration/dhcpcd/releases/download/v@VERSION@/dhcpcd-@VERSION@.tar.xz

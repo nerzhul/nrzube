@@ -1,0 +1,120 @@
+# =============================================================================
+# nrzube — Raspberry Pi 5: Kubernetes worker (containerd + kubelet)
+#
+# Reference defconfig. Versions are pinned in versions.lock; the variables
+# ($(KERNEL_TAG) and friends) are exported by scripts/build-rootfs.sh from
+# versions.mk — never hardcode them here.
+# =============================================================================
+
+# --- Architecture -------------------------------------------------------------
+BR2_aarch64=y
+BR2_cortex_a76=y
+
+# --- Toolchain ---------------------------------------------------------------
+# glibc is MANDATORY: the official kubelet is dynamically linked (musl is
+# ruled out, see plan §3.1).
+# External glibc toolchain (Bootlin).
+#
+# The internal toolchain cannot be used with a custom git kernel: the kernel
+# headers series is not declared, the glibc option of the toolchain becomes
+# invisible and uClibc is silently selected instead. The external toolchain
+# declares its headers version, and it also saves ~20 minutes of build time.
+# External glibc toolchain (Bootlin).
+#
+# The internal toolchain cannot be used with a custom git kernel: the kernel
+# headers series is not declared, the glibc option of the toolchain becomes
+# invisible and uClibc is silently selected instead. The external toolchain
+# declares its headers version, and it also saves ~20 minutes of build time.
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y
+# GCC 15+ fails to build its own libcpp with -Werror=format-security on
+# recent glibc; GCC 14 is the last version that builds cleanly here.
+BR2_GCC_VERSION_14_X=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+# The hash check is NOT forced: Buildroot would then also require a digest
+# for the archive it generates itself from the kernel git repository. Every
+# release artifact is checked against versions.lock by the post-build script
+# (SHA-256) and the pinned kernel commit is verified after the checkout.
+
+# --- Filesystem and init -----------------------------------------------------
+# No Buildroot init system: /init (overlay) starts s6-svscan.
+BR2_INIT_NONE=y
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrzube/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrzube/post-build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrzube/post-image.sh"
+BR2_TARGET_GENERIC_ROOT_PASSWD=""
+BR2_TARGET_GENERIC_HOSTNAME="nrzube"
+BR2_TARGET_GENERIC_ISSUE="nrzube — Kubernetes worker"
+
+# --- Kernel ------------------------------------------------------------------
+# raspberrypi/linux, rpi-6.18.y branch, frozen on tag stable_20260724
+# (6.18.39). The exact COMMIT is verified by scripts/build-rootfs.sh.
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_GIT=y
+# The headers come from the kernel tree; the series is declared explicitly
+# because a custom git kernel does not select it (the glibc option of the
+# toolchain depends on it).
+BR2_KERNEL_HEADERS_AS_KERNEL=y
+BR2_TOOLCHAIN_HEADERS_AT_LEAST_6_18=y
+BR2_LINUX_KERNEL_CUSTOM_REPO_URL="https://github.com/raspberrypi/linux.git"
+BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION="$(KERNEL_TAG)"
+BR2_LINUX_KERNEL_USE_DEFCONFIG=y
+BR2_LINUX_KERNEL_DEFCONFIG="bcm2712"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrzube/kernel-nrzube.fragment"
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="broadcom/bcm2712-rpi-5-b"
+BR2_LINUX_KERNEL_IMAGE_NAME="Image"
+
+# --- Bootloader --------------------------------------------------------------
+# Buildroot 2026.08 no longer ships the U-Boot package: it is built out of
+# tree by scripts/build-uboot.sh (commit pinned in versions.lock).
+# Here we only need the U-Boot tools: mkimage on the host (boot.scr) and
+# fw_printenv/fw_setenv on the target (environment inspection).
+BR2_PACKAGE_HOST_UBOOT_TOOLS=y
+BR2_PACKAGE_HOST_UBOOT_TOOLS_BOOT_SCRIPT=y
+BR2_PACKAGE_HOST_UBOOT_TOOLS_BOOT_SCRIPT_SOURCE="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrzube/boot.cmd"
+BR2_PACKAGE_UBOOT_TOOLS=y
+BR2_PACKAGE_UBOOT_TOOLS_FWPRINTENV=y
+
+# --- Host tools used to assemble the disk image ------------------------------
+# The kernel builds its certificate tools (extract-cert): it needs the host
+# OpenSSL headers.
+BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_SQUASHFS=y
+BR2_PACKAGE_HOST_DOSFSTOOLS=y
+# mtools is NOT built by Buildroot: the host tools are used instead (the
+# Buildroot version needs the X11 headers for "floppyd", which are not
+# available on every build host). mcopy is only needed to populate the FAT
+# boot partition.
+BR2_PACKAGE_HOST_E2FSPROGS=y
+
+# --- Rootfs packages ---------------------------------------------------------
+BR2_PACKAGE_BUSYBOX=y
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrzube/busybox-nrzube.fragment"
+# Supervision: s6-linux (s6-svscan) — no systemd.
+BR2_PACKAGE_S6=y
+# DHCP + DHCPv6 + user-space RA/SLAAC + /etc/resolv.conf (RDNSS).
+BR2_PACKAGE_DHCPCD=y
+BR2_PACKAGE_IPROUTE2=y
+BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_NFS_UTILS=y
+BR2_PACKAGE_CURL=y
+BR2_PACKAGE_CA_CERTIFICATES=y
+BR2_PACKAGE_IPTABLES=y
+BR2_PACKAGE_IPTABLES_NFTABLES=y
+BR2_PACKAGE_NFTABLES=y
+BR2_PACKAGE_KMOD=y
+BR2_PACKAGE_KMOD_TOOLS=y
+
+# --- Root filesystem (A/B slots) ---------------------------------------------
+BR2_TARGET_ROOTFS_SQUASHFS=y
+BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD=y
+BR2_TARGET_ROOTFS_SQUASHFS_BS_128K=y
+# BR2_TARGET_ROOTFS_TAR is not set
+# BR2_TARGET_ROOTFS_EXT2 is not set
+# BR2_TARGET_ROOTFS_CPIO is not set
+
+# --- nrzube agent (Rust) -----------------------------------------------------
+BR2_PACKAGE_NRZUBE_AGENT=y

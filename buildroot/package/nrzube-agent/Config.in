@@ -1,0 +1,13 @@
+config BR2_PACKAGE_NRZUBE_AGENT
+	bool "nrzube-agent"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
+	select BR2_PACKAGE_HOST_RUST
+	help
+	  Supervision, bootstrap and signed OTA agent of the nrzube
+	  Kubernetes worker.
+
+	  The agent is written in Rust and cross-compiled by cargo with
+	  the Buildroot toolchain.
+
+	  https://github.com/nrzube/nrzube

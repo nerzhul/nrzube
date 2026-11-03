@@ -1,0 +1,15 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — DHCP/SLAAC client (s6 service "dhcpcd").
+#
+# dhcpcd handles DHCPv4, DHCPv6, the router advertisements (SLAAC in user
+# space) and writes /etc/resolv.conf (RDNSS included).
+#
+#  -u : stay in the foreground (s6 supervises the process)
+#  -b : do not wait for a lease before continuing the boot
+#  -L : do not deconfigure the interface when the client exits
+# =============================================================================
+exec 2>&1
+
+echo "nrzube[dhcpcd]: starting DHCP/SLAAC client"
+exec /sbin/dhcpcd -u -b -L --timeout 30

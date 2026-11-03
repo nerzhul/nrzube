@@ -1,0 +1,57 @@
+# =============================================================================
+# nrzube — U-Boot v2026.10 fragment for the Raspberry Pi 5 (rpi_arm64_defconfig)
+#
+# The bootloader is chainloaded by the RPi firmware:
+#   config.txt: arm_64bit=1 + kernel=u-boot.bin
+# The firmware hands its DTB over through x0; U-Boot picks it up in
+# `fdt_addr` (board/raspberrypi/rpi/rpi.c: set_fdt_addr()) → no DTB/kernel
+# skew as long as the compiled DTB is not used (documented fallback).
+#
+# Structural choices:
+#  - the A/B slot selector lives in p4 (ext4) and is read by the initramfs;
+#    the U-Boot environment only holds static settings;
+#  - CONFIG_BOOTMETH_RAUC is deliberately left out: its mechanism assumes one
+#    boot partition PER SLOT, which contradicts our layout (a single FAT p1,
+#    slots only on the rootfs). See plan §3.1 item 7.
+# =============================================================================
+
+# --- Boot through a script (boot.scr on the FAT boot partition) --------------
+# BOOTMETH_SCRIPT looks for "boot.scr.uimg" then "boot.scr", with the "/"
+# and "/boot/" prefixes → a boot.scr at the root of p1 is found.
+CONFIG_BOOTSTD=y
+CONFIG_BOOTSTD_DEFAULTS=y
+CONFIG_BOOTMETH_SCRIPT=y
+CONFIG_CMDLINE=y
+
+# --- Environment: FAT on p1, two copies ---------------------------------------
+# The environment is NOT the critical channel (the slot selector lives in p4)
+# but a redundant copy is kept: a power cut during saveenv breaks nothing.
+CONFIG_ENV_REDUNDANT=y
+CONFIG_ENV_FAT_FILE="uboot.env"
+CONFIG_ENV_FAT_FILE_REDUND="uboot-redund.env"
+
+# --- Atomic update of Image/initrd.img inside p1 -----------------------------
+# `fatload`/`load` are enough; `sf` is kept for USB updates.
+CONFIG_CMD_MMC=y
+CONFIG_CMD_SF=y
+CONFIG_CMD_FAT=y
+CONFIG_CMD_FS_GENERIC=y
+
+# --- Network (diagnostics only, not required for booting) --------------------
+CONFIG_NET=y
+CONFIG_NET_LWIP=y
+CONFIG_CMD_PING=y
+CONFIG_CMD_DHCP=y
+
+# --- Miscellaneous ------------------------------------------------------------
+# Kernel load address (text_offset 0x80000) and initramfs load address come
+# from the RPi board default environment (board/raspberrypi/rpi/rpi.env):
+# kernel_addr_r / ramdisk_addr_r.
+CONFIG_OF_BOARD_SETUP=y
+CONFIG_OF_LIBFDT_OVERLAY=y
+
+# No bootcount/altbootcmd: the A/B rollback is driven by the initramfs
+# (failed-boot counter), which works even when the agent never starts.
+# See plan §6.4.
+# CONFIG_BOOTCOUNT is not set
+# CONFIG_ALTBOOTCMD is not set

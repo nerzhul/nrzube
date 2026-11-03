@@ -1,0 +1,27 @@
+# =============================================================================
+# nrzube — Raspberry Pi firmware configuration (partition p1, FAT)
+#
+# The firmware loads u-boot.bin as a "kernel" (chainload). The DTB it hands
+# over through x0 is reused as-is by U-Boot and then by the kernel: no
+# separately compiled DTB is used (no skew risk).
+# =============================================================================
+
+# arm_64bit=1 is MANDATORY: "u-boot.bin" is not a kernel name recognised by
+# the firmware, which would otherwise assume a 32-bit image.
+arm_64bit=1
+
+# Chainload U-Boot (u-boot.bin is dropped on p1 by the image script).
+kernel=u-boot.bin
+
+# Serial console on the GPIO header (RP1 UART => ttyAMA0,115200).
+enable_uart=1
+
+# The console text is cut off by overscan on an HDMI screen.
+disable_overscan=1
+
+# The vc4 display driver asks the firmware not to alter the display setup.
+avoid_warnings=2
+
+# No dtoverlay by default: the firmware base DTB is enough to boot.
+# (bcm2712-rpi-5-b.dtb, compiled from the kernel tree, is present in p1 as a
+#  FALLBACK: boot.cmd only uses it when fdt_addr is empty.)

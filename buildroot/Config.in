@@ -1,0 +1,6 @@
+# nrzube — external tree configuration.
+#
+# The packages of the tree are declared here (see external.mk for the make
+# side).
+
+source "$BR2_EXTERNAL_NRZUBE_PATH/package/nrzube-agent/Config.in"

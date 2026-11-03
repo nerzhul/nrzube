@@ -1,0 +1,31 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — kubelet (s6 service "kubelet").
+#
+# The kubelet only starts once the agent has provisioned the node: the
+# kubeconfig, the client PKI, the KubeletConfiguration and the CNI
+# configuration are written by the agent (plan §5.1).
+#
+# Without a kubeconfig the kubelet would crash-loop; waiting here keeps the
+# service stable while the agent retries the configuration download.
+# =============================================================================
+exec 2>&1
+
+i=0
+while [ ! -f /run/nrzube/provisioned ]; do
+	if [ "$i" -eq 0 ]; then
+		echo "nrzube[kubelet]: waiting for the node provisioning"
+	fi
+	i=$((i + 1))
+	sleep 5
+done
+
+echo "nrzube[kubelet]: starting kubelet"
+
+# --cgroup-driver=cgroupfs: no systemd on the node (containerd runs with
+# SystemdCgroup = false as well).
+exec /usr/bin/kubelet \
+	--config=/var/lib/kubelet/config.yaml \
+	--container-runtime-endpoint=unix:///run/containerd/containerd.sock \
+	--cgroup-driver=cgroupfs \
+	--v=2

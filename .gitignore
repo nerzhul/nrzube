@@ -1,0 +1,26 @@
+# Buildroot / build trees
+/build/
+/out/
+/dist/
+/buildroot/output/
+/buildroot/dl/
+/buildroot/.br2-external.in*
+/buildroot/.config
+
+# Rust
+/agent/target/
+**/*.rs.bk
+
+# Generated artifacts
+*.img
+*.img.gz
+*.squashfs
+*.cpio.gz
+/keys/
+/secrets/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

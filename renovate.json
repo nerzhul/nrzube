@@ -1,0 +1,59 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "enabledManagers": [
+    "custom.regex",
+    "github-actions",
+    "cargo"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)versions\\.lock$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\n\\w+=(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "{{datasource}}",
+      "depNameTemplate": "{{depName}}",
+      "currentValueTemplate": "{{currentValue}}",
+      "versioningTemplate": "{{#if versioning}}{{versioning}}{{/if}}"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "The RPi kernel is pinned on a dated tag of the rpi-6.18.y branch: manual rollout.",
+      "matchDepNames": [
+        "raspberrypi/linux"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "runc < 1.5.2 is incompatible with kernels >= 6.17 (memory corruption): never downgrade.",
+      "matchDepNames": [
+        "opencontainers/runc"
+      ],
+      "matchCurrentVersion": "<1.5.2",
+      "enabled": false
+    }
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 5am on monday"
+    ]
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "security"
+    ]
+  },
+  "prConcurrentLimit": 4,
+  "prHourlyLimit": 4
+}

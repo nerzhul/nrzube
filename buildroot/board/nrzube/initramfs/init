@@ -1,0 +1,194 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — initramfs /init
+#
+# Responsibilities (plan §6.4):
+#   1. mount the pseudo filesystems;
+#   2. discover and mount the state partition (p4, ext4);
+#   3. read the slot selector (/var/lib/nrzube/active-slot);
+#   4. run the failed-boot counter: roll back to the other slot when the
+#      pending slot never confirmed its health;
+#   5. mount the selected squashfs (read-only) and the /etc overlay;
+#   6. switch_root to the real system.
+#
+# This initramfs is the only component whose success does not depend on the
+# updated OS: it is what makes a power cut during an update harmless.
+# =============================================================================
+set -u
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PATH
+
+# Maximum number of boots on a pending slot before the rollback.
+PENDING_MAX_BOOTS=3
+# Maximum number of rollbacks before the node is declared unrecoverable.
+MAX_ROLLBACKS=3
+
+STATE_DIR=/state/lib/nrzube
+STATE_MARKER=nrzube-state
+
+log() {
+	echo "nrzube[initramfs]: $*"
+}
+
+fatal() {
+	log "FATAL: $*"
+	log "dropping to a shell on the console for recovery"
+	# /init is PID 1: exec keeps the console and gives the operator a shell.
+	exec /bin/sh
+}
+
+# --- 1. pseudo filesystems ---------------------------------------------------
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sys /sys 2>/dev/null
+mount -t devtmpfs dev /dev 2>/dev/null
+
+# --- helpers -----------------------------------------------------------------
+
+# Partition device names (whole disks are excluded on purpose).
+partitions() {
+	for dev in /dev/mmcblk*p* /dev/sd[a-z]*[0-9] /dev/vd[a-z]*[0-9] /dev/nvme*n*p*; do
+		[ -b "$dev" ] && printf '%s\n' "$dev"
+	done
+}
+
+read_first_line() {
+	# read_first_line <file> -> first line without trailing blanks
+	[ -f "$1" ] || return 0
+	head -n 1 "$1" 2>/dev/null | tr -d ' \t\r\n'
+}
+
+write_atomic() {
+	# write_atomic <path> <value>: temp file + rename (atomic on ext4)
+	tmp="$1.tmp.$$"
+	if printf '%s\n' "$2" > "$tmp"; then
+		mv "$tmp" "$1"
+	fi
+}
+
+other_slot() {
+	case "$1" in
+	A) printf 'B\n' ;;
+	B) printf 'A\n' ;;
+	*) printf '\n' ;;
+	esac
+}
+
+# --- 2. state partition ------------------------------------------------------
+mkdir -p /state
+STATE_DEV=""
+for dev in $(partitions); do
+	if mount -t ext4 "$dev" /state 2>/dev/null; then
+		if [ -f "/state/$STATE_MARKER" ]; then
+			STATE_DEV="$dev"
+			break
+		fi
+		umount /state 2>/dev/null
+	fi
+done
+
+if [ -z "$STATE_DEV" ]; then
+	fatal "state partition not found (no ext4 partition carrying $STATE_MARKER)"
+fi
+log "state partition: $STATE_DEV"
+
+# --- 3. slot partitions ------------------------------------------------------
+mkdir -p /mnt/slot
+SLOT_A_DEV=""
+SLOT_B_DEV=""
+for dev in $(partitions); do
+	[ "$dev" = "$STATE_DEV" ] && continue
+	if mount -t squashfs -o ro "$dev" /mnt/slot 2>/dev/null; then
+		slot_id="$(read_first_line /mnt/slot/nrzube-slot-id)"
+		case "$slot_id" in
+		A) SLOT_A_DEV="$dev" ;;
+		B) SLOT_B_DEV="$dev" ;;
+		esac
+		umount /mnt/slot 2>/dev/null
+	fi
+done
+log "slot A: ${SLOT_A_DEV:-none}  slot B: ${SLOT_B_DEV:-none}"
+
+# --- 4. slot selection and failed-boot counter -------------------------------
+mkdir -p "$STATE_DIR"
+
+slot="$(read_first_line "$STATE_DIR/active-slot")"
+[ -n "$slot" ] || slot=A
+pending="$(read_first_line "$STATE_DIR/pending-slot")"
+boot_ok="$(read_first_line "$STATE_DIR/boot-ok")"
+
+if [ -n "$pending" ] && [ "$pending" = "$slot" ] && [ "$boot_ok" != "$slot" ]; then
+	# The pending slot has not been confirmed by the agent yet.
+	count="$(read_first_line "$STATE_DIR/pending-boot-count")"
+	case "$count" in
+	'' | *[!0-9]*) count=0 ;;
+	esac
+	count=$((count + 1))
+	write_atomic "$STATE_DIR/pending-boot-count" "$count"
+	log "pending slot $slot not confirmed (attempt $count/$PENDING_MAX_BOOTS)"
+
+	if [ "$count" -ge "$PENDING_MAX_BOOTS" ]; then
+		other="$(other_slot "$slot")"
+		[ -n "$other" ] || fatal "cannot determine the other slot"
+
+		log "rolling back to slot $other"
+		write_atomic "$STATE_DIR/active-slot" "$other"
+		rm -f "$STATE_DIR/pending-slot" "$STATE_DIR/boot-ok"
+		write_atomic "$STATE_DIR/pending-boot-count" 0
+
+		failures="$(read_first_line "$STATE_DIR/boot-fail-count")"
+		case "$failures" in
+		'' | *[!0-9]*) failures=0 ;;
+		esac
+		failures=$((failures + 1))
+		write_atomic "$STATE_DIR/boot-fail-count" "$failures"
+		if [ "$failures" -gt "$MAX_ROLLBACKS" ]; then
+			fatal "$failures rollbacks: the node is considered unrecoverable"
+		fi
+		slot="$other"
+	fi
+else
+	# No pending slot (or the pending slot has been confirmed): the counter is
+	# reset and a stale pending marker is dropped.
+	if [ -n "$pending" ] && [ "$pending" != "$slot" ]; then
+		log "dropping the stale pending marker ($pending != $slot)"
+		rm -f "$STATE_DIR/pending-slot"
+	fi
+	write_atomic "$STATE_DIR/pending-boot-count" 0
+fi
+
+case "$slot" in
+A) SLOT_DEV="$SLOT_A_DEV" ;;
+B) SLOT_DEV="$SLOT_B_DEV" ;;
+*) SLOT_DEV="" ;;
+esac
+
+[ -n "$SLOT_DEV" ] || fatal "slot $slot not found on any partition"
+log "booting slot $slot ($SLOT_DEV)"
+
+# --- 5. mount the slot and the /etc overlay ----------------------------------
+mkdir -p /mnt/lower /newroot
+mount -t squashfs -o ro "$SLOT_DEV" /mnt/lower || fatal "cannot mount the squashfs of slot $slot"
+
+# The new root is a bind mount of the lower: the overlay can then use
+# /mnt/lower/etc as its lowerdir while being mounted on /newroot/etc (the
+# canonical overlayfs layout: lowerdir and mountpoint are distinct paths).
+mount --bind /mnt/lower /newroot || fatal "cannot bind the slot root"
+
+mkdir -p "$STATE_DIR/etc-overlay" "$STATE_DIR/etc-work"
+mount -t overlay overlay \
+	-o "lowerdir=/mnt/lower/etc,upperdir=$STATE_DIR/etc-overlay,workdir=$STATE_DIR/etc-work" \
+	/newroot/etc || fatal "cannot mount the /etc overlay"
+
+# --- 6. move the runtime filesystems and switch to the real system -----------
+mkdir -p /newroot/dev /newroot/proc /newroot/sys /newroot/var
+mount --move /dev /newroot/dev 2>/dev/null
+mount --move /proc /newroot/proc 2>/dev/null
+mount --move /sys /newroot/sys 2>/dev/null
+
+# p4 is the persistent state: it becomes /var in the running system.
+mount --move /state /newroot/var || fatal "cannot move the state partition to /var"
+
+sync
+log "switching to the root filesystem"
+exec switch_root /newroot /init

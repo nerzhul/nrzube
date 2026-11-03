@@ -1,0 +1,17 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — containerd (s6 service "containerd").
+#
+# cgroup v2 only, no systemd: SystemdCgroup = false (see
+# /etc/containerd/config.toml).
+# =============================================================================
+exec 2>&1
+
+mkdir -p /run/containerd /var/lib/containerd
+
+echo "nrzube[containerd]: starting containerd"
+exec /usr/bin/containerd \
+	--config /etc/containerd/config.toml \
+	--root /var/lib/containerd \
+	--state /run/containerd \
+	--address /run/containerd/containerd.sock

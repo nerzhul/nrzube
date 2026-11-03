@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "version": "2026.11.03",
+  "channel": "stable",
+  "components": [
+    { "name": "rootfs", "mediaType": "application/vnd.nrzube.rootfs.v1",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size": 268435456, "ociDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ]
+}

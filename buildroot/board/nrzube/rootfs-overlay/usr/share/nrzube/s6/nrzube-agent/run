@@ -1,0 +1,31 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — supervision agent (s6 service "nrzube-agent").
+#
+# The agent:
+#   - bootstraps the node from the DHCP option 224 URL on first boot, then
+#     persists the configuration in /var (p4) so that the node boots and
+#     rejoins the cluster without any network access;
+#   - exposes /healthz and /metrics on 127.0.0.1:12249;
+#   - polls the OCI registry for signed updates and performs the A/B slot
+#     switch with automatic rollback.
+#
+# It runs as root: it writes the kubelet PKI, mounts the slots and writes the
+# GPT partitions.
+# =============================================================================
+exec 2>&1
+
+# containerd must be up before the agent can report its health or run a
+# container (the OTA rollback check drives a probe container).
+i=0
+while [ ! -S /run/containerd/containerd.sock ]; do
+	if [ "$i" -ge 60 ]; then
+		echo "nrzube[agent]: WARNING: containerd socket not available yet" >&2
+		break
+	fi
+	i=$((i + 1))
+	sleep 1
+done
+
+echo "nrzube[agent]: starting nrzube-agent"
+exec /usr/bin/nrzube-agent
