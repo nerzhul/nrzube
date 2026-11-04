@@ -37,8 +37,8 @@ env:
   OUT_DIR: "output"
   DIST_DIR: "dist"
   
-  # Build kind: "full" for release (boot-gate is for validation only)
-  TARGET_KIND: "full"
+  # Build kind: "boot-gate" for now (full build will be enabled after validation)
+  TARGET_KIND: "boot-gate"
 
 jobs:
   build-and-release:

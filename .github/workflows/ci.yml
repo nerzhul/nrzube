@@ -6,10 +6,10 @@
 #   - Pushes to main (manual trigger for full build)
 #
 # Performs:
-#   1. Full native build (arm64) of the nrzube image
+#   1. Boot gate build (arm64) for validation (default)
 #   2. Static verification (file existence, manifest validity)
 #   3. Unit tests for the Rust agent (if applicable)
-#   4. (Optional) Boot gate build for quick validation
+#   4. Optional: Full build via workflow_dispatch
 #
 # This workflow does NOT sign or publish artifacts.
 # =============================================================================
@@ -28,11 +28,11 @@ on:
       target:
         description: 'Build target'
         required: true
-        default: 'full'
+        default: 'boot-gate'
         type: choice
         options:
-          - full
           - boot-gate
+          - full
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
