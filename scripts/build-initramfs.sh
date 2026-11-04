@@ -94,6 +94,14 @@ for lib in $("$READELF" -d "$TARGET/bin/busybox" 2>/dev/null |
 	copy_lib "$found"
 done
 
+# --- loader search path ------------------------------------------------------
+# There is no /etc/ld.so.cache in the initramfs, so the glibc loader falls
+# back to its built-in search path /lib64:/usr/lib64. Reproduce the target's
+# lib64 symlinks so the libraries copied above are actually found.
+mkdir -p "$STAGE/usr"
+ln -sf lib "$STAGE/lib64"
+ln -sf ../lib "$STAGE/usr/lib64"
+
 # --- init script --------------------------------------------------------------
 cp "$BOARD_DIR/initramfs/init" "$STAGE/init"
 chmod 0755 "$STAGE/init"

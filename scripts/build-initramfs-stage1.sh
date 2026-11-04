@@ -28,7 +28,7 @@ mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/proc" "$STAGE/sys" "$STAGE/dev"
 cp "$TARGET/bin/busybox" "$STAGE/bin/busybox"
 chmod 0755 "$STAGE/bin/busybox"
 
-for applet in sh mount umount mkdir cat tr head mv rm ls grep sed dmesg; do
+for applet in sh mount umount mkdir cat tr head mv rm ls grep sed dmesg uname; do
 	ln -sf /bin/busybox "$STAGE/bin/$applet"
 done
 
@@ -82,6 +82,14 @@ for lib in $("$READELF" -d "$TARGET/bin/busybox" 2>/dev/null |
 	}
 	copy_lib "$found"
 done
+
+# --- loader search path ------------------------------------------------------
+# There is no /etc/ld.so.cache in the initramfs, so the glibc loader falls
+# back to its built-in search path /lib64:/usr/lib64. Reproduce the target's
+# lib64 symlinks so the libraries copied above are actually found.
+mkdir -p "$STAGE/usr"
+ln -sf lib "$STAGE/lib64"
+ln -sf ../lib "$STAGE/usr/lib64"
 
 # --- init script -------------------------------------------------------------
 cp "$BOARD_DIR/initramfs/stage1-init" "$STAGE/init"
