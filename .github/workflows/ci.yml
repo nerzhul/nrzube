@@ -46,7 +46,7 @@ env:
 
 jobs:
   build:
-    name: Build (${{ inputs.target || 'full' }})
+    name: Build (${{ inputs.target || 'boot-gate' }})
     runs-on: ubuntu-24.04-arm
     
     steps:
@@ -96,7 +96,7 @@ jobs:
           OUT_DIR="$REPO_DIR/${{ env.OUT_DIR }}"
           DIST_DIR="$REPO_DIR/${{ env.DIST_DIR }}"
           SRC_DIR="$REPO_DIR/${{ env.BUILD_DIR }}/src"
-          TARGET_KIND="${{ inputs.target || 'full' }}"
+          TARGET_KIND="${{ inputs.target || 'boot-gate' }}"
           
           "$REPO_DIR/scripts/build-all.sh" \
             "$REPO_DIR" \
@@ -112,7 +112,7 @@ jobs:
       - name: Verify build outputs
         run: |
           # For boot-gate
-          if [[ "${{ inputs.target || 'full' }}" == "boot-gate" ]]; then
+          if [[ "${{ inputs.target || 'boot-gate' }}" == "boot-gate" ]]; then
             [ -f "${{ env.DIST_DIR }}/nrzube-boot-gate.img" ] || exit 1
             [ -f "${{ env.OUT_DIR }}/Image" ] || exit 1
             [ -f "${{ env.OUT_DIR }}/u-boot.bin" ] || exit 1
@@ -167,7 +167,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nrzube-artifacts-${{ inputs.target || 'full' }}
+          name: nrzube-artifacts-${{ inputs.target || 'boot-gate' }}
           path: |
             ${{ env.DIST_DIR }}/
             ${{ env.OUT_DIR }}/
