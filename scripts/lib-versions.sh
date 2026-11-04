@@ -8,8 +8,10 @@
 # usage: . scripts/lib-versions.sh
 # =============================================================================
 
-NRZUBE_LIB_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
-NRZUBE_REPO_DIR="$(CDPATH='' cd -- "$NRZUBE_LIB_DIR/.." && pwd)"
+# Use the current working directory as the repo root, since the build
+# scripts are always invoked from the repository root. This is POSIX-compatible
+# and works with both /bin/sh and bash.
+NRZUBE_REPO_DIR="$(pwd)"
 
 set -a
 # shellcheck disable=SC1091
