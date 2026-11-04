@@ -11,7 +11,7 @@ repository = "https://github.com/nrzube/nrzube"
 
 [workspace.dependencies]
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hex = "0.4"
