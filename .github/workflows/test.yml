@@ -1,0 +1,197 @@
+# =============================================================================
+# nrzube — Test Workflow
+#
+# Manual workflow for testing specific components without triggering a full CI.
+# Use this for:
+#   - Testing the Rust agent
+#   - Testing the initramfs
+#   - Testing the build process on specific branches
+#
+# Trigger: Manual (GitHub Actions UI or API)
+# =============================================================================
+
+name: Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Component to test'
+        required: true
+        default: 'build'
+        type: choice
+        options:
+          - build
+          - agent
+          - initramfs
+          - sign
+      target:
+        description: 'Build target'
+        required: false
+        default: 'boot-gate'
+        type: choice
+        options:
+          - boot-gate
+          - full
+      log-level:
+        description: 'Build log level'
+        required: false
+        default: 'info'
+        type: choice
+        options:
+          - debug
+          - info
+          - warn
+
+jobs:
+  test:
+    name: Test (${{ inputs.component }})
+    runs-on: ubuntu-24.04-arm
+    
+    steps:
+      # -------------------------------------------------------------------------
+      # 1. Checkout
+      # -------------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -------------------------------------------------------------------------
+      # 2. Install dependencies
+      # -------------------------------------------------------------------------
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc \
+            build-essential \
+            curl \
+            fakeroot \
+            genimage \
+            mtools \
+            python3 \
+            squashfs-tools \
+            u-boot-tools
+
+      # -------------------------------------------------------------------------
+      # 3. Install cosign and ORAS (for sign tests)
+      # -------------------------------------------------------------------------
+      - name: Install cosign
+        if: inputs.component == 'sign'
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v3.1.4"
+
+      - name: Install ORAS
+        if: inputs.component == 'sign'
+        run: |
+          curl -LO https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_arm64.tar.gz
+          sudo tar -xzf oras_*.tar.gz -C /usr/local/bin oras
+          rm oras_*.tar.gz
+
+      # -------------------------------------------------------------------------
+      # 4. Run tests based on component
+      # -------------------------------------------------------------------------
+      - name: Run build test
+        if: inputs.component == 'build'
+        run: |
+          mkdir -p build/buildroot output dist src
+          ./scripts/build-all.sh "$(pwd)" build/buildroot output dist src "${{ inputs.target }}"
+          
+          # Verify outputs
+          if [ "${{ inputs.target }}" = "boot-gate" ]; then
+            [ -f dist/nrzube-boot-gate.img ] || exit 1
+            ls -lh dist/
+          else
+            [ -f dist/nrzube.img ] || exit 1
+            [ -f dist/release.json ] || exit 1
+            ls -lh dist/
+          fi
+
+      - name: Run agent test
+        if: inputs.component == 'agent'
+        run: |
+          # First do a minimal build to get the agent
+          mkdir -p build/buildroot output dist src
+          ./scripts/build-all.sh "$(pwd)" build/buildroot output dist src "boot-gate"
+          
+          # Check if agent binary exists
+          if [ -f output/target/nrzube-agent ]; then
+            echo "Agent binary found"
+            file output/target/nrzube-agent
+            
+            # Try to run it (if it supports --version or --help)
+            output/target/nrzube-agent --version 2>/dev/null || \
+            output/target/nrzube-agent --help 2>/dev/null || \
+            echo "Agent does not support --version or --help"
+          else
+            echo "Agent binary not found in target"
+            exit 1
+          fi
+
+      - name: Run initramfs test
+        if: inputs.component == 'initramfs'
+        run: |
+          # Build the initramfs
+          mkdir -p build/buildroot output dist src
+          ./scripts/build-all.sh "$(pwd)" build/buildroot output dist src "boot-gate"
+          
+          # Check if initrd.img exists and is valid
+          [ -f output/initrd.img ] || exit 1
+          
+          # Verify it's a valid initramfs
+          file output/initrd.img
+          
+          # Try to extract and inspect (optional)
+          mkdir -p /tmp/initramfs-test
+          cd /tmp/initramfs-test
+          cp "$OLDPWD/output/initrd.img" .
+          
+          # Check the header
+          head -c 100 initrd.img | strings || true
+          
+          cd "$OLDPWD"
+          rm -rf /tmp/initramfs-test
+
+      - name: Run sign test
+        if: inputs.component == 'sign'
+        run: |
+          # This test verifies the signing process without a real private key
+          # It uses a test key pair
+          
+          # Generate test key pair
+          cosign generate-key-pair --kms none --algorithm ecdsa-sha256
+          
+          # Create a test manifest
+          echo '{"version":"test","components":[]}' > test-manifest.json
+          
+          # Sign it
+          cosign sign-blob --key cosign.key --bundle test-manifest.json.sig test-manifest.json
+          
+          # Verify
+          cosign verify-blob --key cosign.pub --bundle test-manifest.json.sig test-manifest.json
+          
+          # Clean up
+          rm -f cosign.key cosign.pub test-manifest.json test-manifest.json.sig
+
+      # -------------------------------------------------------------------------
+      # 5. Upload artifacts
+      # -------------------------------------------------------------------------
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts-${{ inputs.component }}-${{ inputs.target }}
+          path: |
+            output/
+            dist/
+          retention-days: 1
+          compression-level: 0
+
+      # -------------------------------------------------------------------------
+      # 6. Clean up
+      # -------------------------------------------------------------------------
+      - name: Clean up
+        if: always()
+        run: rm -rf build/ output/ dist/

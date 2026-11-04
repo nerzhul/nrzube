@@ -1,0 +1,95 @@
+# =============================================================================
+# nrzube — Dependabot Configuration
+#
+# Automatically updates:
+#   - GitHub Actions workflows
+#   - Dockerfiles (future)
+#   - Rust dependencies (Cargo.toml)
+#
+# Note: Buildroot, kernel, and other system-level dependencies are managed
+# by Renovate (renovate.json) for more complex version pinning.
+# =============================================================================
+
+version: 2
+
+updates:
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "UTC"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    reviewers:
+      - "nerzhul"
+    assignees:
+      - "nerzhul"
+
+  # Rust (Cargo)
+  - package-ecosystem: "cargo"
+    directory: "/agent"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "UTC"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "rust"
+    reviewers:
+      - "nerzhul"
+    assignees:
+      - "nerzhul"
+
+  # Rust (workspace)
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "05:00"
+      timezone: "UTC"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "rust"
+    reviewers:
+      - "nerzhul"
+    assignees:
+      - "nerzhul"
+
+# Exclude specific dependencies that should be managed manually
+ignore:
+  # Buildroot and kernel versions are managed by Renovate with custom logic
+  - dependency-name: "*buildroot*"
+  - dependency-name: "*linux*"
+  - dependency-name: "*raspberrypi*"
+  
+  # Kubernetes versions are pinned carefully
+  - dependency-name: "*kubernetes*"
+  - dependency-name: "*k8s*"
+
+# Group updates for better PR management
+groups:
+  github-actions:
+    patterns:
+      - "*"
+    package-ecosystem: "github-actions"
+
+  rust-agent:
+    patterns:
+      - "*"
+    package-ecosystem: "cargo"
+    directory: "/agent"

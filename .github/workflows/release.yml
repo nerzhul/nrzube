@@ -1,0 +1,248 @@
+# =============================================================================
+# nrzube — Release CI/CD Workflow
+#
+# Triggered on tagged commits (v*). Performs:
+#   1. Full native build (arm64) of the nrzube image
+#   2. SHA-256 hashing of all artifacts
+#   3. Cosign signing of the release manifest
+#   4. ORAS push to GHCR (OCI artifacts)
+#   5. GitHub Release with assets (image, manifest, signature, SHA256SUMS)
+#
+# Requires:
+#   - GitHub Actions runner: ubuntu-24.04-arm (native arm64)
+#   - Repository secrets:
+#     * COSIGN_PRIVATE_KEY: PEM-encoded private key for signing (base64)
+#     * COSIGN_PASSWORD:    Password for the private key (empty if none)
+#
+# Artifacts published:
+#   - OCI: ghcr.io/<owner>/<repo>/nrzube:<tag> (image + manifest + signature)
+#   - Release: nrzube.img, release.json, release.json.sig, SHA256SUMS
+# =============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  # Image and manifest names
+  IMAGE_NAME: "nrzube"
+  MANIFEST_NAME: "release.json"
+  SIGNATURE_NAME: "release.json.sig"
+  
+  # Directories (relative to the workspace)
+  BUILD_DIR: "build"
+  OUT_DIR: "output"
+  DIST_DIR: "dist"
+  
+  # Build kind: "full" for release (boot-gate is for validation only)
+  TARGET_KIND: "full"
+
+jobs:
+  build-and-release:
+    name: Build, sign and release
+    runs-on: ubuntu-24.04-arm
+    
+    steps:
+      # -------------------------------------------------------------------------
+      # 1. Checkout the repository
+      # -------------------------------------------------------------------------
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for git describe / version info
+
+      # -------------------------------------------------------------------------
+      # 2. Install host dependencies
+      # -------------------------------------------------------------------------
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc \
+            build-essential \
+            curl \
+            fakeroot \
+            genimage \
+            mtools \
+            python3 \
+            squashfs-tools \
+            u-boot-tools \
+            util-linux \
+            xxxd
+
+      # -------------------------------------------------------------------------
+      # 3. Set up cosign
+      # -------------------------------------------------------------------------
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v3.1.4"  # Pinned to match versions.lock
+
+      # -------------------------------------------------------------------------
+      # 4. Set up ORAS
+      # -------------------------------------------------------------------------
+      - name: Install ORAS
+        run: |
+          curl -LO https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_arm64.tar.gz
+          sudo tar -xzf oras_*.tar.gz -C /usr/local/bin oras
+          rm oras_*.tar.gz
+          oras version
+
+      # -------------------------------------------------------------------------
+      # 5. Configure environment for the build
+      # -------------------------------------------------------------------------
+      - name: Set environment variables
+        run: |
+          echo "NRZUBE_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+          echo "NRZUBE_CHANNEL=stable" >> $GITHUB_ENV
+          
+          # Create working directories
+          mkdir -p ${{ env.BUILD_DIR }}/buildroot
+          mkdir -p ${{ env.OUT_DIR }}
+          mkdir -p ${{ env.DIST_DIR }}
+
+      # -------------------------------------------------------------------------
+      # 6. Full build (native, arm64)
+      # -------------------------------------------------------------------------
+      - name: Build nrzube image
+        id: build
+        run: |
+          # The build scripts expect absolute paths
+          REPO_DIR="$(pwd)"
+          BR2_DIR="$REPO_DIR/${{ env.BUILD_DIR }}/buildroot"
+          OUT_DIR="$REPO_DIR/${{ env.OUT_DIR }}"
+          DIST_DIR="$REPO_DIR/${{ env.DIST_DIR }}"
+          SRC_DIR="$REPO_DIR/${{ env.BUILD_DIR }}/src"
+          
+          # Run the full build
+          "$REPO_DIR/scripts/build-all.sh" \
+            "$REPO_DIR" \
+            "$BR2_DIR" \
+            "$OUT_DIR" \
+            "$DIST_DIR" \
+            "$SRC_DIR" \
+            "${{ env.TARGET_KIND }}"
+          
+          # Verify the output
+          [ -f "$DIST_DIR/nrzube.img" ] || { echo "Build failed: nrzube.img not found"; exit 1; }
+          [ -f "$DIST_DIR/release.json" ] || { echo "Build failed: release.json not found"; exit 1; }
+          [ -f "$DIST_DIR/SHA256SUMS" ] || { echo "Build failed: SHA256SUMS not found"; exit 1; }
+          
+          # Print the digest for verification
+          sha256sum "$DIST_DIR/nrzube.img" | tee -a "$DIST_DIR/SHA256SUMS"
+          echo "image_sha=$(sha256sum $DIST_DIR/nrzube.img | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          
+          echo "Build successful:"
+          ls -lh "$DIST_DIR"
+
+      # -------------------------------------------------------------------------
+      # 7. Sign the release manifest with cosign
+      # -------------------------------------------------------------------------
+      - name: Sign release manifest
+        id: sign
+        run: |
+          # Decode the private key (stored as base64 in the secret)
+          echo "${{ secrets.COSIGN_PRIVATE_KEY }}" | base64 -d > cosign.key
+          chmod 600 cosign.key
+          
+          # Sign the manifest (detached signature, bundle format)
+          cosign sign-blob \
+            --key cosign.key \
+            --bundle "$DIST_DIR/${{ env.SIGNATURE_NAME }}" \
+            "$DIST_DIR/${{ env.MANIFEST_NAME }}" \
+            ${{ secrets.COSIGN_PASSWORD && format('--password {0}', secrets.COSIGN_PASSWORD) || '' }}
+          
+          # Verify the signature
+          cosign verify-blob \
+            --key cosign.key \
+            --bundle "$DIST_DIR/${{ env.SIGNATURE_NAME }}" \
+            "$DIST_DIR/${{ env.MANIFEST_NAME }}"
+          
+          # Clean up
+          rm -f cosign.key
+          
+          echo "Manifest signed successfully"
+
+      # -------------------------------------------------------------------------
+      # 8. Push to GHCR (OCI registry)
+      # -------------------------------------------------------------------------
+      - name: Push to GHCR
+        id: push
+        run: |
+          # Set the OCI artifact type
+          ARTIFACT_TYPE="application/vnd.nrzube.image.v1"
+          
+          # Push the image, manifest and signature as OCI artifacts
+          oras push \
+            "ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}" \
+            --artifact-type "$ARTIFACT_TYPE" \
+            "$DIST_DIR/nrzube.img:$ARTIFACT_TYPE" \
+            "$DIST_DIR/${{ env.MANIFEST_NAME }}:application/json" \
+            "$DIST_DIR/${{ env.SIGNATURE_NAME }}:application/vnd.cosign.bundle"
+          
+          # Also push with the 'latest' tag if this is a stable release
+          if [[ "${{ github.ref_name }}" =~ ^v[0-9]+\[.\][0-9]+\.[0-9]+$ ]]; then
+            oras push \
+              "ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:latest" \
+              --artifact-type "$ARTIFACT_TYPE" \
+              "$DIST_DIR/nrzube.img:$ARTIFACT_TYPE" \
+              "$DIST_DIR/${{ env.MANIFEST_NAME }}:application/json" \
+              "$DIST_DIR/${{ env.SIGNATURE_NAME }}:application/vnd.cosign.bundle"
+          fi
+          
+          echo "OCI artifacts pushed to GHCR"
+
+      # -------------------------------------------------------------------------
+      # 9. Create GitHub Release
+      # -------------------------------------------------------------------------
+      - name: Create GitHub Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "nrzube ${{ github.ref_name }}"
+          body: |
+            # nrzube Release ${{ github.ref_name }}
+            
+            **Image SHA-256:** `${{ steps.build.outputs.image_sha }}`
+            
+            ## Artifacts
+            - **Disk Image**: `nrzube.img` (GPT layout with boot, slot A/B, state partitions)
+            - **Release Manifest**: `release.json` (signed with cosign)
+            - **Signature Bundle**: `release.json.sig`
+            - **Checksums**: `SHA256SUMS`
+            
+            ## OCI Registry
+            The image is also available as OCI artifacts:
+            ```
+            ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:latest
+            ```
+            
+            ## Verification
+            ```bash
+            # Verify the image hash
+            sha256sum nrzube.img
+            
+            # Verify the manifest signature (requires cosign)
+            cosign verify-blob --key cosign.pub --bundle release.json.sig release.json
+            ```
+          files: |
+            ${{ env.DIST_DIR }}/nrzube.img
+            ${{ env.DIST_DIR }}/release.json
+            ${{ env.DIST_DIR }}/release.json.sig
+            ${{ env.DIST_DIR }}/SHA256SUMS
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+      # -------------------------------------------------------------------------
+      # 10. Clean up (optional, for space)
+      # -------------------------------------------------------------------------
+      - name: Clean up build artifacts
+        if: always()
+        run: |
+          rm -rf ${{ env.BUILD_DIR }}
+          rm -rf ${{ env.OUT_DIR }}

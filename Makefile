@@ -147,3 +147,57 @@ flash: ## Write the image to an SD card (FLASH_DEVICE=/dev/sdX)
 .PHONY: sha256
 sha256: ## Show the SHA-256 of the produced artifacts
 	cd $(DIST_DIR) && sha256sum *.img *.json *.bundle 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# CI / Release
+# ---------------------------------------------------------------------------
+
+.PHONY: ci-validate
+ci-validate: ## Validate CI configuration (workflows, secrets, dependencies)
+	./scripts/ci-validate.sh
+
+.PHONY: ci-build
+ci-build: native-build ## Build the image (same as CI)
+
+.PHONY: ci-test
+ci-test: test test-scripts ## Run CI tests locally
+
+.PHONY: ci-sign
+ci-sign: ## Sign the release manifest (requires COSIGN_PRIVATE_KEY env var)
+	@if [ -z "$(COSIGN_PRIVATE_KEY)" ]; then \
+		echo "ERROR: COSIGN_PRIVATE_KEY environment variable not set"; \
+		echo "Generate a key pair with: ./scripts/gen-cosign-keypair.sh ."; \
+		echo "Then: export COSIGN_PRIVATE_KEY=\"\$(base64 -w0 cosign.key)\""; \
+		exit 1; \
+	fi
+	@test -f "$(DIST_DIR)/release.json" || { echo "ERROR: release.json missing - run 'make image' first"; exit 1; }
+	@echo "Signing release manifest..."
+	@echo "$(COSIGN_PRIVATE_KEY)" | base64 -d > cosign.key.tmp
+	@chmod 600 cosign.key.tmp
+	cosign sign-blob --key cosign.key.tmp --bundle $(DIST_DIR)/release.json.sig $(DIST_DIR)/release.json
+	@rm -f cosign.key.tmp
+	@echo "Manifest signed: $(DIST_DIR)/release.json.sig"
+
+.PHONY: ci-push
+ci-push: ## Push artifacts to GHCR (requires GHCR_TOKEN env var)
+	@if [ -z "$(GHCR_TOKEN)" ]; then \
+		echo "ERROR: GHCR_TOKEN environment variable not set"; \
+		echo "Get a token with: gh auth token --scopes write:packages"; \
+		exit 1; \
+	fi
+	@test -f "$(DIST_DIR)/release.json.sig" || { echo "ERROR: release.json.sig missing - run 'make ci-sign' first"; exit 1; }
+	@echo "Pushing to GHCR..."
+	@echo "$(GHCR_TOKEN)" | oras login ghcr.io --username $(shell whoami) --password-stdin
+	oras push ghcr.io/$(shell git config --get remote.origin.url | sed 's/.*github.com[:/]//;s/\.git//')/nrzube:$(NRZUBE_VERSION) \
+		--artifact-type application/vnd.nrzube.image.v1 \
+		"$(DIST_DIR)/nrzube.img:application/vnd.nrzube.image.v1" \
+		"$(DIST_DIR)/release.json:application/json" \
+		"$(DIST_DIR)/release.json.sig:application/vnd.cosign.bundle"
+
+.PHONY: ci-release
+ci-release: ci-sign ci-push ## Full CI release (build + sign + push)
+	@echo "Release $(NRZUBE_VERSION) complete!"
+	@echo "OCI artifact: ghcr.io/$(shell git config --get remote.origin.url | sed 's/.*github.com[:/]//;s/\.git//')/nrzube:$(NRZUBE_VERSION)"
+
+.PHONY: ci
+ci: ci-validate ci-build ci-test ## Run full CI validation locally
