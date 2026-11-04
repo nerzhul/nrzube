@@ -1,0 +1,23 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — chronyd (s6 service "chronyd").
+#
+# NTP client of the node (plan §5.7). The Pi 5 has no battery-backed RTC: after
+# a power cut the clock is wrong and the kubelet TLS to the API server fails,
+# so the clock must be stepped at startup (makestep in /etc/chrony.conf).
+#
+# The sources are dynamic: .sources files under /run/chrony (tmpfs), written
+# by the dhcpcd hook 60-nrzube-ntp (DHCP option 42) and by the agent
+# (ntpServers of the node config).
+# =============================================================================
+exec 2>&1
+
+# /run is a fresh tmpfs at every boot: recreate the runtime directory of
+# chronyd, owned by the chrony user created by the Buildroot package (the
+# agent and the dhcpcd hook may have created it as root before us; install -d
+# fixes the ownership of an existing directory).
+install -d -o chrony -g chrony /run/chrony
+
+echo "nrzube[chronyd]: starting chronyd"
+# -d: stay in the foreground (s6 supervises the process), with debug logs.
+exec /usr/sbin/chronyd -d -f /etc/chrony.conf

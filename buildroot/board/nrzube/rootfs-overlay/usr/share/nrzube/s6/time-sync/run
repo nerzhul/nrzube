@@ -1,0 +1,28 @@
+#!/bin/sh
+# =============================================================================
+# nrzube — time-sync marker (s6 service "time-sync").
+#
+# Writes /run/nrzube/time-synced once chronyd reports a synchronised clock and
+# removes it if the synchronisation is lost. The kubelet service waits for
+# this marker before starting (plan §5.7): with no battery-backed RTC on the
+# Pi 5, the kubelet TLS to the API server fails while the clock is wrong.
+# =============================================================================
+exec 2>&1
+
+mkdir -p /run/nrzube
+rm -f /run/nrzube/time-synced
+
+while true; do
+	if chronyc -n waitsync 1 >/dev/null 2>&1; then
+		touch /run/nrzube/time-synced
+		echo "nrzube[time-sync]: the clock is synchronised"
+		# Keep watching: drop the marker again if the sync is lost.
+		while chronyc -n waitsync 30 >/dev/null 2>&1; do
+			sleep 30
+		done
+		rm -f /run/nrzube/time-synced
+		echo "nrzube[time-sync]: WARNING: the time synchronisation is lost"
+	else
+		sleep 2
+	fi
+done

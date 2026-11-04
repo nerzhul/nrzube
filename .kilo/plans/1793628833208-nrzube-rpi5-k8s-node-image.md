@@ -7,7 +7,10 @@
 
 ## 0. Status
 
-**Last update:** 2026-11-03 — after the Phase 1 "boot gate" build.
+**Last update:** 2026-11-04 — constrained-environment decisions (environment is
+**not airgapped**, but constrained and controlled): NTP via chrony (§5.7),
+boot provisioning retry + **full reboot after 10 min of failures** (§5.8),
+DHCP option 224 → HTTP config server kept (§10).
 
 ### 0.1 What exists in the repository
 
@@ -19,6 +22,7 @@
 | U-Boot fragment + boot script | done | `buildroot/board/nrzube/uboot-nrzube.fragment`, `boot.cmd` |
 | Firmware `config.txt` | done | `buildroot/board/nrzube/config.txt` |
 | Rootfs overlay (`/init`, s6 services, sysctl policy, dhcpcd, containerd) | done, **never assembled** | `buildroot/board/nrzube/rootfs-overlay/` |
+| chrony/NTP wiring (§5.7) | done, unit tested, never run on hardware | `etc/chrony.conf`, `usr/lib/dhcpcd/60-nrzube-ntp`, `usr/share/nrzube/s6/{chronyd,time-sync}/run`, kubelet time gate, `ntpServers` in the agent |
 | Real initramfs (slot A/B, failed-boot counter, rollback, `/etc` overlay) | done, **never assembled** | `buildroot/board/nrzube/initramfs/init` |
 | Stage 1 initramfs (boot gate) | done, **built and verified** | `buildroot/board/nrzube/initramfs/stage1-init` |
 | Rust agent | done, unit tested, **never run on hardware** | `agent/` |
@@ -67,7 +71,9 @@ initramfs).
 | 5 | CI workflow (build, SHA-256, `cosign sign-blob`, `oras push` to GHCR) | no | `oras`/`cosign` not wired yet |
 | 6 | Remaining docs (`architecture.md`, `boot-chain.md`, `ota.md`, `troubleshooting.md`) | no | |
 | 7 | Smoke-test script of the full image (boot → slot switch → rollback) | no | |
-| 8 | Gate 3 (offline), gate 4 (power cut), gate 5 (OTA) | for "operational" | described in `docs/gates.md` |
+| 8 | Gate 3 (WAN down), gate 4 (power cut), gate 5 (OTA) | for "operational" | described in `docs/gates.md` |
+| 9 | chrony/NTP wiring + kubelet time-sync gate | yes for Phase 4 | **done 2026-11-04** (§5.7): defconfig, overlay, hook, agent `ntpServers`, cargo tests pass |
+| 10 | Boot provisioning deadline: full reboot after 10 min of DHCP/HTTP failures (unprovisioned node only) + unit tests | yes for Phase 4 | design in §5.8, not implemented |
 
 ### 0.4 Doubts and open risks
 
@@ -108,10 +114,11 @@ initramfs).
 
 **Product**
 
-9. The open questions of §10 are still open (CNI/kube-proxy answered
-   partially: the cluster provides them; the node mechanism, the DHCP option
-   224 support of the router, the GHCR visibility and the external state
-   device are unanswered).
+9. The environment is **constrained and controlled, not airgapped** (decision
+   of 2026-11-04): the LAN provides DHCP (option 224), an HTTP config server,
+   NTP servers and the cluster API; GHCR remains reachable for OTA. The open
+   questions of §10 are updated accordingly (option 224 kept; the LAN NTP
+   addresses are still to be provided).
 10. `kube-proxy` and `crictl` were removed from the image (decision of
     2026-11-03): the cluster provides kube-proxy, and without SSH access
     `crictl` has no user. `kubectl` is kept for console debugging.
@@ -127,6 +134,7 @@ initramfs).
 | 5 | `oci-client` crate for the registry | minimal OCI client written in the agent | full control over the auth flow, no unknown dependency |
 | 6 | crictl and kube-proxy in the image | removed | decision of 2026-11-03 |
 | 7 | `CONFIG_CGROUP_V2=y` in the fragment | `CONFIG_CGROUPS=y` + the controllers | there is no `CONFIG_CGROUP_V2` symbol: the unified hierarchy comes with `CONFIG_CGROUPS` |
+| 8 | "airgapped target" (working assumption during the architecture review of 2026-11-04) | constrained and controlled LAN | decision of 2026-11-04: DHCP option 224 + HTTP config server, LAN NTP and GHCR are available; WAN-down resilience is kept as a robustness requirement (§6), not as the primary mode |
 
 ## 1. Objective
 
@@ -139,6 +147,12 @@ that:
 - exposes a **Rust agent** that (a) watches the health of containerd/kubelet,
   (b) applies **signed OTA updates** (cosign) from a trusted OCI registry,
   with automatic **A/B rollback**;
+- runs an **NTP client (chrony)** towards the LAN NTP servers — the Pi 5 has
+  no battery-backed RTC, so after a power cut the clock is wrong and TLS to
+  the API server would fail (§5.7);
+- **resists DHCP/HTTP unavailability during boot**: retries the provisioning,
+  then performs a **full reboot after 10 minutes of failures** when the node
+  is not yet provisioned (§5.8);
 - is **built and signed in CI** (cosign), every artifact being **hashed
   (SHA-256)**.
 
@@ -159,7 +173,9 @@ that:
 | Update transport | **OCI registry (GHCR)** | standard cloud-native, reusable |
 | Boot support | **microSD card** | requested; see §8 (wear) |
 | PVC storage | **local-path, NFS, hostPath** (USB devices) | requested; kernel modules already present (`NFS_FS=y`) |
-| Node bootstrap | **Dedicated DHCP option** → node config URL, **persisted at first boot** | consistent with DHCP; no secret in the image; **the node reboots without network** (§6.2) |
+| Node bootstrap | **Dedicated DHCP option** → node config URL, **persisted at first boot** | consistent with DHCP; no secret in the image; **the node reboots without network** (§6.2). Kept as-is (decision of 2026-11-04, constrained environment) |
+| Time sync | **chrony** (`BR2_PACKAGE_CHRONY`), servers from DHCP option 42 + `ntpServers` in the node config; kubelet gated on a time-synced marker | no systemd-timesyncd (no systemd); the Pi 5 has no battery-backed RTC → after a power cut the clock is wrong and the kubelet TLS to the API server fails (§5.7) |
+| Boot resilience | provisioning retried every 30 s; **full reboot after 10 min** of failures, only when no persisted config exists | a full reboot re-initialises the PHY/DHCP/switch path, recovering cases a process-level retry cannot; a provisioned node never reboots for a network reason (§5.8) |
 | Sysctls | **The OS sets `ip_forward` (v4+v6) + `accept_ra=2` + `rp_filter=0`**; the rest is set by kubelet/Cilium | `accept_ra` has a functional default **inverted** when forwarding is on: without `=2`, IPv6 SLAAC breaks silently (§6.5) |
 | Metrics port | **12249** (not 9100) | 9100 is the conventional node_exporter port; 12249 is free |
 | CI | **GitHub Actions**, native arm64 runner `ubuntu-24.04-arm` + native Arch script | GHA is possible and arm64 means no emulation |
@@ -263,7 +279,7 @@ Single binary, ~3–5 MiB, started by s6. Responsibilities:
 ### 5.1 Bootstrap (first boot only)
 
 1. dhcpcd provides `new_nrzube_config_url` (DHCP option 224) → the agent fetches a JSON config.
-2. The config contains: `apiServer`, `caCert`, `clientCert`/`clientKey` (or a token), `kubeletFlags`, `cni`, `registry` (URL + pull token), `cosignPublicKey` (optional, otherwise the embedded one).
+2. The config contains: `apiServer`, `caCert`, `clientCert`/`clientKey` (or a token), `kubeletFlags`, `cni`, `registry` (URL + pull token), `cosignPublicKey` (optional, otherwise the embedded one), `ntpServers` (LAN NTP servers, fed to chrony — §5.7).
 3. The agent writes: `/var/lib/kubelet/pki/*`, `/var/lib/kubelet/kubeconfig`, `/var/lib/kubelet/config.yaml` (KubeletConfiguration), `/etc/cni/net.d/*`.
 4. The agent **persists the config** in `/var/lib/nrzube/node-config.json` (p4) and sets the `provisioned` marker.
 5. The agent **applies the node name**: `sethostname(2)` (the running hostname, what `uname -n` shows), `/etc/hostname` (persistent, in the overlay upper of p4) and `/run/nrzube/node-name`. The name must be a valid DNS-1123 label — it is the name of the Kubernetes node object.
@@ -315,9 +331,75 @@ Configuration points:
 - **IP stability**: dhcpcd re-uses the last known lease if the DHCP server is momentarily unreachable (`lastlease`), which limits the disruptions. The indispensable complement: **DHCP reservation by MAC** on the router side + a fixed `--node-ip` for the kubelet (§8).
 - **Stable IPv6**: `slaac private` (RFC 7217) gives a stable address. *Correction:* `use_tempaddr=0` does **not** exist in dhcpcd 10.2.4 — RFC 4941 temporary addresses are only created when `slaac … temporary` is requested, which we do not do.
 
+### 5.7 Time synchronization: chrony (no systemd-timesyncd)
+
+The Pi 5 has **no battery-backed RTC**: after a power cut the clock restarts at
+the build/epoch time, and the kubelet's TLS connection to the API server fails
+(certificate "not yet valid") — the node would boot but never join the cluster.
+There is no systemd, so **systemd-timesyncd is not an option**.
+
+Decision (2026-11-04): **chrony** (`BR2_PACKAGE_CHRONY`, version pinned in
+`versions.lock`).
+
+- `makestep 1.0 -1`: large offsets are stepped immediately at startup
+  (unlimited steps at boot) — exactly the power-cut case.
+- Two server sources, merged:
+  - **DHCP option 42** (`new_ntp_servers`): a dhcpcd hook
+    (`usr/lib/dhcpcd/60-nrzube-ntp`) writes the servers as a chrony `.sources`
+    file under `/run/chrony/` (tmpfs);
+  - **`ntpServers`** in the node config: the agent writes them as a second
+    `.sources` file under `/run/chrony/` — the LAN is controlled, so known
+    servers are listed there; this also covers a boot from the persisted
+    config where DHCP option 42 is absent.
+- Base config `/etc/chrony.conf` (overlay lower): `sourcedir /run/chrony`,
+  `rtcsync` (harmless without an RTC, useful with an RTC add-on),
+  `bindcmdaddress 127.0.0.1`, no `allow` (the node serves no NTP client).
+- **Kubelet gating**: the kubelet s6 service waits (bounded, e.g. 120 s,
+  non-fatal afterwards) for the `/run/nrzube/time-synced` marker, written by a
+  small s6 service looping on `chronyc waitsync` — the kubelet must not start
+  before the clock is sane.
+- Files: `buildroot/configs/nrzube_pi5_defconfig` (`BR2_PACKAGE_CHRONY=y`),
+  `rootfs-overlay/etc/chrony.conf`,
+  `rootfs-overlay/usr/lib/dhcpcd/60-nrzube-ntp`,
+  `rootfs-overlay/usr/share/nrzube/s6/chronyd/run`,
+  `rootfs-overlay/usr/share/nrzube/s6/time-sync/run`, kubelet `run` updated.
+- Gate check: after a power cut, `chronyc tracking` must show a sane stratum
+  before the kubelet registers the node.
+
+### 5.8 Boot resilience: retry, then full reboot after 10 minutes
+
+Requirement (2026-11-04): the node must survive **DHCP/HTTP unavailability during
+the boot process** — retry, and after **10 minutes of failures** perform a
+**full reboot**.
+
+Scope: the deadline applies **only when the node is not yet provisioned** (no
+persisted `/var/lib/nrzube/node-config.json`). A provisioned node never reboots
+for a network reason (§6.2): it boots on its persisted config + `lastlease`.
+
+Behaviour (implemented in the agent's bootstrap loop,
+`agent/nrzube-agent/src/main.rs`):
+
+| Situation at boot | Behaviour |
+|---|---|
+| Persisted config present | load it, write the derived files — **no network, no reboot deadline** |
+| No persisted config, DHCP option 224 received, HTTP fetch OK | provision and persist (current behaviour) |
+| No persisted config + no option 224 / no lease / HTTP error / timeout | retry every `BOOTSTRAP_RETRY` (30 s); once `BOOT_PROVISION_DEADLINE` (10 min) since the agent start is exceeded → `sync` + `reboot(LINUX_REBOOT_CMD_RESTART)`, with an explicit log line and a `provision_deadline_exceeded` metric |
+
+- dhcpcd keeps `-b` (the boot is not blocked on a lease) and `lastlease`
+  (short DHCP outages on a provisioned node are absorbed without any reboot).
+- The reboot loop (one full reboot every ~10 min while the DHCP/HTTP config
+  path is down) is **intentional**: a cold reboot re-initialises the PHY, the
+  DHCP client state and the switch port, which recovers cases a process-level
+  retry cannot. It is visible on the serial console and in the p4 logs.
+- Implementation notes: the deadline is a `Duration` parameter of the
+  bootstrap function (injectable for unit tests); the agent starts seconds
+  after boot, so "agent start" ≈ "boot start". Unit test: with a zero-length
+  deadline and no persisted config, the bootstrap must request a reboot
+  (reboot call mocked).
+
 ## 6. Offline boot and survival to a power cut
 
-This is the structuring constraint of the system. An already deployed node must **reboot and rejoin the cluster without internet**, and a power cut during an update must not make it unusable.
+This is the structuring constraint of the system. The target environment is **constrained and controlled, not airgapped** (decision of 2026-11-04), but an already deployed node must still **reboot and rejoin the cluster with the WAN down**, and a power cut during an update must not make it unusable.
 
 ### 6.1 What is local vs. what is network
 
@@ -327,6 +409,7 @@ This is the structuring constraint of the system. An already deployed node must 
 | Rootfs `/usr`, `/bin`, `/sbin` | **no** | squashfs A or B, local |
 | Node config: kubeconfig, kubelet config, CNI config, registry token | **no** | persisted in p4 (ext4 state) |
 | IP address + default route + IPv6 SLAAC | yes, **but the local LAN only** | DHCP + RA from the router (works without internet) |
+| Time synchronization (NTP) | yes, **LAN only** | DHCP option 42 + `ntpServers` from the node config → chrony (§5.7); mandatory because the Pi 5 has no battery-backed RTC |
 | Container images of the pods | yes | registry (the node starts and stays `NotReady` if the registry is unreachable) |
 | OS OTA update | yes | OCI registry — **a network failure must break nothing** |
 
@@ -345,6 +428,7 @@ is on the next boot.**
 1. First boot: DHCP → option 224 → URL → the agent downloads the config → **persists** it in `/var/lib/nrzube/node-config.json` (p4) → writes the `provisioned` marker.
 2. Later boots: the agent reads `/var/lib/nrzube/node-config.json`. **No network access.**
 3. DHCP is no longer needed after the first boot (the IP is handled by dhcpcd alone). Option 224 can disappear without consequence.
+4. Corollary (decision of 2026-11-04): the 10-minute reboot deadline of §5.8 applies **only** to a node without a persisted config. A provisioned node never reboots for a network reason.
 
 ### 6.3 Atomicity of the update (survival to a power cut)
 
@@ -428,6 +512,7 @@ rollbacks — this avoids a ping-pong between two broken slots.
 | CNI plugins | `v1.9.1` (`cni-plugins-linux-arm64-v1.9.1.tgz`) |
 | cosign | `v3.1.4` |
 | dhcpcd | `v10.2.4` |
+| chrony | `4.8` (`33ea8eb2a4daeaa506e8fcafd5d6d89027ed6f2f0609645c6f149b560d301706`, same digest as Buildroot's `package/chrony/chrony.hash`) — §5.7 |
 
 `kube-proxy` and `crictl` are **not** in the image (decision of 2026-11-03).
 
@@ -485,6 +570,8 @@ key → manifest signature → sha256 of the components`.
 | microSD wear (container images, `/var`) | card death | documented; propose a persistent state on NVMe/USB (the `state` partition can be moved) — see §10 question 5 |
 | Signing secret in the image | leak of the **private** key | only the **public** key is embedded; the private key only lives in the CI secrets |
 | **The boot partition lacks the RPi GPU firmware** | the board does not boot | fixed in the boot gate: `start4.elf` + `fixup4.dat` are shipped in p1 (§0.4) |
+| **No battery-backed RTC on the Pi 5 ⇒ after a power cut the clock is wrong ⇒ TLS to the API server fails** | node boots but never joins | chrony with `makestep` at startup + kubelet gated on a time-synced marker (§5.7) |
+| **DHCP/HTTP config path unavailable at first boot** | node stuck unprovisioned | retry every 30 s, then **full reboot after 10 min** (§5.8); once provisioned, the persisted config makes later boots network-independent (§6.2) |
 
 ## 9. Execution plan
 
@@ -505,6 +592,7 @@ key → manifest signature → sha256 of the components`.
 
 8. Full Buildroot defconfig: `BR2_PACKAGE_S6`, `BR2_PACKAGE_DHCPCD`, `BR2_PACKAGE_IPTABLES`/`NFTABLES`, `BR2_PACKAGE_IPROUTE2`, `BR2_PACKAGE_E2FSPROGS`, `BR2_PACKAGE_NFS_UTILS`, `BR2_PACKAGE_CURL`, `BR2_PACKAGE_CA_CERTIFICATES`, `BR2_PACKAGE_UBOOT_TOOLS` (fw_setenv). ✅ written
 9. Buildroot overlay: `/init`, `dhcpcd.conf` (option 224), s6 services (`dhcpcd`, `containerd`, `kubelet`, `nrzube-agent`), `containerd/config.toml`, sysctl script (§6.5). ✅ written
+9a. chrony: `BR2_PACKAGE_CHRONY=y` in the defconfig, `etc/chrony.conf`, dhcpcd hook `60-nrzube-ntp` (option 42), s6 services `chronyd` + `time-sync`, kubelet `run` gated on `/run/nrzube/time-synced`, agent writes `/run/chrony/nodeconfig.sources` from `ntpServers`. ✅ done 2026-11-04 (`cargo test`: 35 passed; `sh -n` on the shell files) (§5.7)
 10. Buildroot package `nrzube-agent` (Rust): `Config.in` + `.mk` (cargo cross-compile aarch64). ✅ written
 11. **Initramfs**: mounts p4, reads `active-slot`, mounts the squashfs + the `/etc` overlay, `switch_root`. Includes the **failed-boot counter** → automatic switch to the other slot (§6.4). ✅ written
 
@@ -512,11 +600,12 @@ key → manifest signature → sha256 of the components`.
 
 12. Rust workspace: config, `/metrics` + `/healthz` on **12249**, containerd/kubelet scraping. ✅
 13. Bootstrap: read the DHCP option → node config → **persist in p4** → write kubeconfig/pki/kubelet config/CNI. ✅
+13a. Boot provisioning deadline: `BOOT_PROVISION_DEADLINE` (10 min) + full reboot when exceeded and no persisted config; injectable deadline + unit test. ⬜ (§5.8)
 14. OTA: OCI pull, cosign verification (§5.4), write the inactive slot, switch, validate, rollback. ✅
 
 **Phase 4 — Kubernetes** ⬜ not started
 
-15. Kubelet config (cgroupfs, node-ip, runtime endpoint), CNI plugins in `/opt/cni/bin`, kube-proxy per §10.
+15. Kubelet config (cgroupfs, node-ip, runtime endpoint), CNI plugins in `/opt/cni/bin`, kube-proxy per §10. Note: `kubeletFlags.nodeIp` is parsed by the agent but not yet emitted (`nodeIP` / `--node-ip`) — to fix here.
 
 **Phase 5 — CI & publication** ⬜ not started
 
@@ -536,11 +625,14 @@ key → manifest signature → sha256 of the components`.
 
 ## 10. Open questions (to be settled before Phase 4)
 
+> Environment clarified on 2026-11-04: **constrained and controlled, not airgapped**. The LAN provides DHCP, the HTTP config server, NTP and the cluster API; GHCR is reachable for OTA. WAN-down resilience is kept as a robustness requirement (§6), not as the primary operating mode.
+
 1. **CNI / kube-proxy of the existing cluster.** *Partially answered (2026-11-03):* the cluster provides the CNI (DaemonSet) and kube-proxy (DaemonSet or replaced by Cilium). The image ships only the CNI plugin **binaries** (`/opt/cni/bin`); the configuration is written by the cluster. The image does **not** ship kube-proxy.
 2. **Real join mechanism.** The DHCP delivers a config URL; but the exact way to obtain a valid kubeconfig (bootstrap token, client certificate, pre-provisioned file) must be aligned with the existing cluster. Working assumption: `clientCert` + `clientKey` in the node config.
-3. **Router support for DHCP option 224.** Confirm that the router can inject a vendor option 224 (otherwise: fall back to a `node.conf` file in p1 or a hardcoded URL).
-4. **GHCR registry.** Public or private repository? If private, the pull token is delivered by the node config.
+3. **Router support for DHCP option 224.** *Decided (2026-11-04): keep the DHCP option 224 → HTTP config URL.* The router must still be confirmed to inject option 224; the documented fallback remains a `node.conf` file in p1.
+4. **GHCR registry.** Public or private repository? If private, the pull token is delivered by the node config. (Environment not airgapped: GHCR is reachable.)
 5. **Persistence on external storage.** The `state` partition (containerd + kubelet + local-path PVCs) on microSD will wear out. Should a layout supporting a `state` on NVMe/USB be designed from Phase 1 (design option, not decided yet).
+6. **LAN NTP servers (new, 2026-11-04).** Addresses of the NTP servers of the controlled LAN, delivered via DHCP option 42 and/or `ntpServers` in the node config (§5.7).
 
 ## 11. Out of scope
 

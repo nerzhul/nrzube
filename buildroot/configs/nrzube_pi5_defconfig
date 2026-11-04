@@ -97,6 +97,9 @@ BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_NRZUBE_PATH)/board/nrz
 BR2_PACKAGE_S6=y
 # DHCP + DHCPv6 + user-space RA/SLAAC + /etc/resolv.conf (RDNSS).
 BR2_PACKAGE_DHCPCD=y
+# NTP client: chrony. No systemd-timesyncd (no systemd) and the Pi 5 has no
+# battery-backed RTC: the clock must be stepped at boot (plan §5.7).
+BR2_PACKAGE_CHRONY=y
 BR2_PACKAGE_IPROUTE2=y
 BR2_PACKAGE_E2FSPROGS=y
 BR2_PACKAGE_NFS_UTILS=y

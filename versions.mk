@@ -37,6 +37,8 @@ COSIGN_URL := $(subst @VERSION@,$(COSIGN_VERSION),$(COSIGN_URL_TEMPLATE))
 
 DHCPCD_URL := $(subst @VERSION@,$(DHCPCD_VERSION),$(DHCPCD_URL_TEMPLATE))
 
+CHRONY_URL := $(subst @VERSION@,$(CHRONY_VERSION),$(CHRONY_URL_TEMPLATE))
+
 # --- Kernel tree -------------------------------------------------------------
 
 KERNEL_REPO_URL := https://github.com/$(KERNEL_REPO).git

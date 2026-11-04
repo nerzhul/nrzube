@@ -122,6 +122,8 @@ if [ "$WITH_SHA256" -eq 1 ]; then
 		"https://github.com/sigstore/cosign/releases/download/v$(get COSIGN_VERSION)/cosign-linux-arm64"
 	refresh_sha256 DHCPCD_SHA256 \
 		"https://github.com/NetworkConfiguration/dhcpcd/releases/download/v$(get DHCPCD_VERSION)/dhcpcd-$(get DHCPCD_VERSION).tar.xz"
+	refresh_sha256 CHRONY_SHA256 \
+		"https://chrony-project.org/releases/chrony-$(get CHRONY_VERSION).tar.gz"
 else
 	log "skipping the SHA-256 refresh (use --sha256 to force it)"
 fi

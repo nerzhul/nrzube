@@ -89,6 +89,7 @@ If the console stays silent, the failure is in the firmware or in U-Boot
 | 7 | The kubelet | the node object appears in the cluster and becomes `Ready` |
 | 8 | The agent | `curl 127.0.0.1:12249/healthz` and `/metrics` answer |
 | 9 | The config persistence | `/var/lib/nrzube/node-config.json` exists after the first boot |
+| 10 | The time sync (chrony) | `chronyc tracking` shows a stratum < 16, `/run/nrzube/time-synced` exists, `/run/chrony/` holds `dhcp.sources` (option 42) and `nodeconfig.sources` (`ntpServers`), and the kubelet started after the marker |
 
 ---
 
@@ -104,6 +105,11 @@ The node must boot and rejoin the cluster **without the network**:
 
 The DHCP option 224 is read **once**: after the first boot the configuration
 comes from `/var/lib/nrzube/node-config.json`.
+
+The NTP sources survive the same way: the agent rewrites
+`/run/chrony/nodeconfig.sources` from `ntpServers` at every boot, so chrony
+gets its sources even with the DHCP server disabled (the `dhcp.sources` file
+from option 42 is then simply absent).
 
 ---
 

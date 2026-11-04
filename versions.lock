@@ -80,6 +80,13 @@ COSIGN_SHA256=ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2
 DHCPCD_VERSION=10.2.4
 DHCPCD_SHA256=6721e606609226dbf4d864a78802a9e96beec0ee034a1bd84138b3e037bba7d9
 
+# --- chrony (NTP client — no systemd-timesyncd; the Pi 5 has no RTC, §5.7) ---
+# Not on GitHub: pinned from the upstream git tags. The same digest is also
+# pinned by Buildroot itself (package/chrony/chrony.hash), which builds it.
+# renovate: datasource=git-tags depName=https://git.tuxfamily.org/chrony.git versioning=loose
+CHRONY_VERSION=4.8
+CHRONY_SHA256=33ea8eb2a4daeaa506e8fcafd5d6d89027ed6f2f0609645c6f149b560d301706
+
 # --- Rust (nrzube-agent cross-compilation) -----------------------------------
 # renovate: datasource=github-tags depName=rust-lang/rust versioning=loose
 RUST_VERSION=1.94.0
@@ -98,3 +105,4 @@ KUBERNETES_URL_TEMPLATE=https://dl.k8s.io/release/v@VERSION@/bin/linux/arm64
 CNI_URL_TEMPLATE=https://github.com/containernetworking/plugins/releases/download/v@VERSION@/cni-plugins-linux-arm64-v@VERSION@.tgz
 COSIGN_URL_TEMPLATE=https://github.com/sigstore/cosign/releases/download/v@VERSION@/cosign-linux-arm64
 DHCPCD_URL_TEMPLATE=https://github.com/NetworkConfiguration/dhcpcd/releases/download/v@VERSION@/dhcpcd-@VERSION@.tar.xz
+CHRONY_URL_TEMPLATE=https://chrony-project.org/releases/chrony-@VERSION@.tar.gz

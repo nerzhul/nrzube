@@ -20,6 +20,23 @@ while [ ! -f /run/nrzube/provisioned ]; do
 	sleep 5
 done
 
+# Wait for the clock to be synchronised (plan §5.7): the Pi 5 has no
+# battery-backed RTC and the kubelet TLS to the API server fails while the
+# clock is wrong. Bounded wait (24 x 5 s = 120 s), non-fatal afterwards so the
+# node stays debuggable from the console.
+i=0
+while [ ! -f /run/nrzube/time-synced ]; do
+	if [ "$i" -eq 0 ]; then
+		echo "nrzube[kubelet]: waiting for the time synchronisation (chrony)"
+	fi
+	if [ "$i" -ge 24 ]; then
+		echo "nrzube[kubelet]: WARNING: time not synchronised after 120s, starting anyway" >&2
+		break
+	fi
+	i=$((i + 1))
+	sleep 5
+done
+
 echo "nrzube[kubelet]: starting kubelet"
 
 # The name of the node object is imposed: the kubelet would otherwise derive
