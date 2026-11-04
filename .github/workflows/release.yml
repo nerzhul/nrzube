@@ -51,7 +51,7 @@ jobs:
       # -------------------------------------------------------------------------
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0  # Needed for git describe / version info
 
