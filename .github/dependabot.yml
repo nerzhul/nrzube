@@ -29,8 +29,6 @@ updates:
       - "github-actions"
     reviewers:
       - "nerzhul"
-    assignees:
-      - "nerzhul"
 
   # Rust (Cargo)
   - package-ecosystem: "cargo"
@@ -48,10 +46,8 @@ updates:
       - "rust"
     reviewers:
       - "nerzhul"
-    assignees:
-      - "nerzhul"
 
-  # Rust (workspace)
+  # Rust (workspace root)
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
@@ -67,29 +63,3 @@ updates:
       - "rust"
     reviewers:
       - "nerzhul"
-    assignees:
-      - "nerzhul"
-
-# Exclude specific dependencies that should be managed manually
-ignore:
-  # Buildroot and kernel versions are managed by Renovate with custom logic
-  - dependency-name: "*buildroot*"
-  - dependency-name: "*linux*"
-  - dependency-name: "*raspberrypi*"
-  
-  # Kubernetes versions are pinned carefully
-  - dependency-name: "*kubernetes*"
-  - dependency-name: "*k8s*"
-
-# Group updates for better PR management
-groups:
-  github-actions:
-    patterns:
-      - "*"
-    package-ecosystem: "github-actions"
-
-  rust-agent:
-    patterns:
-      - "*"
-    package-ecosystem: "cargo"
-    directory: "/agent"

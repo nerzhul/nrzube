@@ -1,0 +1,35 @@
+#!/bin/sh
+# ===========================================================================
+# nrzube — Mount tmpfs for container logs (64 Mo, no microSD wear)
+#
+# This service mounts a tmpfs filesystem on /var/lib/containerd/logs
+# to store container logs in RAM instead of on the microSD card.
+#
+# Configuration:
+#   - Size: 64 MiB (adjustable via TMPFS_SIZE)
+#   - Permissions: 750, owned by root:root
+#   - Contains: containerd container logs (5 MiB max per file)
+#
+# Dependencies: None (runs early in the boot process)
+# ===========================================================================
+
+set -eu
+
+TMPFS_MOUNT="/var/lib/containerd/logs"
+TMPFS_SIZE="64M"
+
+# Ensure mount point exists
+mkdir -p "$TMPFS_MOUNT"
+
+# Check if already mounted (idempotent)
+if ! mountpoint -q "$TMPFS_MOUNT"; then
+	mount -t tmpfs -o size="$TMPFS_SIZE",mode=750,uid=0,gid=0 tmpfs "$TMPFS_MOUNT"
+	echo "tmpfs: mounted $TMPFS_MOUNT (size=$TMPFS_SIZE)"
+fi
+
+# Ensure containerd can write to the directory
+chmod 750 "$TMPFS_MOUNT"
+chown 0:0 "$TMPFS_MOUNT"
+
+exec 0<> /dev/null
+exec 2>&1

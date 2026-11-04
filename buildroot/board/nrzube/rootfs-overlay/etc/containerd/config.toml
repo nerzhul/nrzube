@@ -2,7 +2,8 @@
 # nrzube — containerd configuration.
 #
 # containerd 2.x: cgroup v2 only, no systemd on the node.
-# ============================================================================
+# Logs are stored in tmpfs (RAM) to avoid microSD wear.
+# =============================================================================
 
 version = 3
 
@@ -19,10 +20,13 @@ state = "/run/containerd"
 
   [plugins."io.containerd.grpc.v1.cri"]
     # No systemd on the node: the cgroup manager is the plain cgroupfs one.
-    # Both the deprecated top-level key and the per-runtime option are set:
-    # containerd 2.x reads the runtime option.
     systemd_cgroup = false
     sandbox_image = "registry.k8s.io/pause:3.10"
+    
+    # Log configuration to limit wear on microSD.
+    # Each container log file is limited to 5 MiB, with max 3 files per container.
+    max_log_file_size = "5MiB"
+    max_log_files = 3
 
     [plugins."io.containerd.grpc.v1.cri".containerd]
       default_runtime_name = "runc"

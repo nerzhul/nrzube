@@ -1,0 +1,30 @@
+#!/bin/sh
+# ===========================================================================
+# nrzube — Start containerd service
+#
+# Starts the containerd daemon after tmpfs-logs is mounted.
+# This ensures container logs are written to RAM, not microSD.
+#
+# Dependencies:
+#   - tmpfs-logs (must be started first)
+#   - /var/lib/containerd/logs must exist
+# ===========================================================================
+
+set -eu
+
+# Configuration
+CONTAINERD_CONFIG="/etc/containerd/config.toml"
+CONTAINERD_ROOT="/var/lib/containerd"
+CONTAINERD_LOG_DIR="${CONTAINERD_ROOT}/logs"
+
+# Wait for tmpfs to be mounted
+while [ ! -d "$CONTAINERD_LOG_DIR" ]; do
+	sleep 0.1
+done
+
+# Ensure directories exist
+mkdir -p "$CONTAINERD_ROOT"
+mkdir -p "/run/containerd"
+
+# Start containerd
+exec containerd --config="$CONTAINERD_CONFIG" --root="$CONTAINERD_ROOT" --address=/run/containerd/containerd.sock
