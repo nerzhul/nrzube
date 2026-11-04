@@ -15,6 +15,9 @@ NRZUBE_AGENT_LICENSE_FILES = LICENSE
 NRZUBE_AGENT_DEPENDENCIES = host-rust
 
 # The sources live in the repository, next to the Buildroot tree.
+# Local source: SITE and SOURCE must be empty.
+NRZUBE_AGENT_SITE =
+NRZUBE_AGENT_SOURCE =
 NRZUBE_AGENT_OVERRIDE_SRCDIR = $(BR2_EXTERNAL_NRZUBE_PATH)/../agent
 NRZUBE_AGENT_OVERRIDE_SRCDIR_RSYNC_EXCLUSIONS = /target /.git
 
