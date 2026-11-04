@@ -20,7 +20,7 @@ hyper = { version = "1", features = ["client", "http2", "server"] }
 hyper-util = { version = "0.1", features = ["client", "server", "tokio"] }
 libc = "0.2"
 log = { version = "0.4", features = ["std"] }
-p256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
+p256 = { version = "0.14", features = ["ecdsa", "pem", "pkcs8"] }
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls-webpki-roots",
